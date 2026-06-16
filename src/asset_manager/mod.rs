@@ -108,6 +108,25 @@ impl AssetManager {
         let attachment = CreateAttachment::bytes(data, filename);
         (embed, Some(attachment))
     }
+
+    /// Build an embed with a large image attachment.
+    pub fn embed_with_large(&self, name: &str, embed: CreateEmbed) -> (CreateEmbed, Option<CreateAttachment>) {
+        let url = match self.get_attachment_url(name) {
+            Some(u) => u,
+            None => return (embed, None),
+        };
+        let data = match self.cache.get(name) {
+            Some(d) => d.clone(),
+            None => return (embed, None),
+        };
+        let filename = match self.mapping.get(name) {
+            Some(f) => f.clone(),
+            None => return (embed, None),
+        };
+        let embed = embed.image(url);
+        let attachment = CreateAttachment::bytes(data, filename);
+        (embed, Some(attachment))
+    }
 }
 
 impl Default for AssetManager {
@@ -123,6 +142,18 @@ pub async fn prepare_embed(
 ) -> (CreateEmbed, Option<CreateAttachment>) {
     if let Some(state) = ctx.data.read().await.get::<BotStateKey>() {
         state.asset_manager.embed_with(name, embed)
+    } else {
+        (embed, None)
+    }
+}
+
+pub async fn prepare_embed_large(
+    ctx: &Context,
+    name: &str,
+    embed: CreateEmbed,
+) -> (CreateEmbed, Option<CreateAttachment>) {
+    if let Some(state) = ctx.data.read().await.get::<BotStateKey>() {
+        state.asset_manager.embed_with_large(name, embed)
     } else {
         (embed, None)
     }

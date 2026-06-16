@@ -22,7 +22,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         .description("Clique no botão abaixo para iniciar seu formulário de entrada.")
         .colour(Colour::new(0x2B2D31));
 
-    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "verification", embed).await;
+    let (embed, attachment) = crate::asset_manager::prepare_embed_large(ctx, "verification", embed).await;
 
     let button = CreateButton::new("request_access")
         .label("Verificar")
