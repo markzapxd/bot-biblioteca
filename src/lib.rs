@@ -1,3 +1,4 @@
+pub mod asset_manager;
 pub mod cache;
 pub mod commands;
 pub mod config;
@@ -13,4 +14,5 @@ pub mod repositories;
 pub mod services;
 pub mod state;
 pub mod tests;
+pub mod theme;
 pub mod utils;

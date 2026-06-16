@@ -44,12 +44,12 @@ pub fn build_avatar_page(user_id: u64, history: &[AvatarEntry], page: usize) -> 
             .field("Página", format!("{} / {}", safe_page + 1, total_pages), true)
             .field("Data", entry.date.format("%d/%m/%Y %H:%M").to_string(), true)
             .image(&entry.url)
-            .colour(Colour::new(0x3498DB))
+            .colour(Colour::new(0x2B2D31))
     } else {
         CreateEmbed::new()
             .title("Histórico de Avatares")
             .description("Nenhum avatar no histórico.")
-            .colour(Colour::new(0x3498DB))
+            .colour(Colour::new(0x2B2D31))
     };
 
     let prev_disabled = safe_page == 0;

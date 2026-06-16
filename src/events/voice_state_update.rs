@@ -13,11 +13,14 @@ pub async fn handle(ctx: Context, old: Option<VoiceState>, new: VoiceState) {
             Some(id) => id.to_string(),
             None => return,
         };
+        let guild_id_num = new.guild_id.map(|g| g.get()).unwrap_or(0);
+        let user_name = new.member.as_ref().map(|m| m.user.name.clone()).unwrap_or_else(|| "Unknown".to_string());
 
         let old_channel = old.as_ref().and_then(|o| o.channel_id);
         let new_channel = new.channel_id;
 
         if old_channel.is_some() && new_channel.is_none() {
+            let channel_name = old_channel.unwrap().name(&ctx).await.unwrap_or_else(|_| "Unknown".to_string());
             if let Ok(Some(session)) = crate::repositories::voice_session_repo::find_active_by_user_guild(pool, &user_id, &guild_id).await {
                 let now = chrono::Utc::now();
                 let duration = now.signed_duration_since(session.joined_at).num_milliseconds();
@@ -28,14 +31,16 @@ pub async fn handle(ctx: Context, old: Option<VoiceState>, new: VoiceState) {
                 if let Err(e) = crate::repositories::user_repo::add_voice_time(pool, &user_id, duration).await {
                     tracing::error!("Failed to add voice time: {}", e);
                 }
+                let _ = crate::services::log_manager::log_voice_leave(&ctx, &user_name, &channel_name, duration, guild_id_num, pool).await;
             }
         } else if new_channel.is_some() && old_channel != new_channel {
             let channel_id = new_channel.unwrap().to_string();
-            let channel_name = "Unknown".to_string();
+            let channel_name = new_channel.unwrap().name(&ctx).await.unwrap_or_else(|_| "Unknown".to_string());
             let now = chrono::Utc::now();
             if let Err(e) = crate::repositories::voice_session_repo::create(pool, &user_id, &guild_id, None, &channel_id, &channel_name, now).await {
                 tracing::error!("Failed to create voice session: {}", e);
             }
+            let _ = crate::services::log_manager::log_voice_join(&ctx, &user_name, &channel_name, guild_id_num, pool).await;
         }
     }
 }

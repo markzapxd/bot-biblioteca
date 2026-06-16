@@ -5,38 +5,38 @@ pub fn success(title: &str, description: &str) -> CreateEmbed {
     CreateEmbed::new()
         .title(title)
         .description(description)
-        .colour(Colour::new(0x00FF00))
+        .colour(Colour::new(0x2B2D31))
 }
 
 pub fn error(title: &str, description: &str) -> CreateEmbed {
     CreateEmbed::new()
         .title(title)
         .description(description)
-        .colour(Colour::new(0xFF0000))
+        .colour(Colour::new(0x2B2D31))
 }
 
 pub fn info(title: &str, description: &str) -> CreateEmbed {
     CreateEmbed::new()
         .title(title)
         .description(description)
-        .colour(Colour::new(0x3498DB))
+        .colour(Colour::new(0x2B2D31))
 }
 
 pub fn warning(title: &str, description: &str) -> CreateEmbed {
     CreateEmbed::new()
         .title(title)
         .description(description)
-        .colour(Colour::new(0xFFFF00))
+        .colour(Colour::new(0x2B2D31))
 }
 
 pub fn user_info(user_data: &User) -> CreateEmbed {
     let mut embed = CreateEmbed::new()
-        .title("User Info")
-        .colour(Colour::new(0x3498DB));
-    embed = embed.field("User ID", &user_data.user_id, true);
-    embed = embed.field("Private", format!("{}", user_data.is_private_mode()), true);
+        .title("Informações do Usuário")
+        .colour(Colour::new(0x2B2D31));
+    embed = embed.field("ID do Usuário", &user_data.user_id, true);
+    embed = embed.field("Privado", format!("{}", user_data.is_private_mode()), true);
     embed = embed.field(
-        "Total Voice Time",
+        "Tempo Total em Voz",
         format!("{} ms", user_data.total_voice_time.unwrap_or(0)),
         true,
     );
@@ -45,75 +45,75 @@ pub fn user_info(user_data: &User) -> CreateEmbed {
 
 pub fn voice_session(session: &VoiceSession) -> CreateEmbed {
     let mut embed = CreateEmbed::new()
-        .title("Voice Session")
-        .colour(Colour::new(0x3498DB));
-    embed = embed.field("User", &session.user_id, true);
-    embed = embed.field("Channel", &session.channel_name, true);
-    embed = embed.field("Duration", session.duration_formatted(), true);
+        .title("Sessão de Voz")
+        .colour(Colour::new(0x2B2D31));
+    embed = embed.field("Usuário", &session.user_id, true);
+    embed = embed.field("Canal", &session.channel_name, true);
+    embed = embed.field("Duração", session.duration_formatted(), true);
     embed
 }
 
 pub fn member_join(member: &serenity::all::Member) -> CreateEmbed {
     let mut embed = CreateEmbed::new()
-        .title("Member Joined")
-        .colour(Colour::new(0x00FF00));
+        .title("Membro Entrou")
+        .colour(Colour::new(0x2B2D31));
     if let Some(user) = &member.user.global_name {
-        embed = embed.field("User", user, true);
+        embed = embed.field("Usuário", user, true);
     }
-    embed = embed.field("User ID", member.user.id.to_string(), true);
+    embed = embed.field("ID do Usuário", member.user.id.to_string(), true);
     embed
 }
 
 pub fn member_leave(member: &serenity::all::Member) -> CreateEmbed {
     let mut embed = CreateEmbed::new()
-        .title("Member Left")
-        .colour(Colour::new(0xFF0000));
+        .title("Membro Saiu")
+        .colour(Colour::new(0x2B2D31));
     if let Some(user) = &member.user.global_name {
-        embed = embed.field("User", user, true);
+        embed = embed.field("Usuário", user, true);
     }
-    embed = embed.field("User ID", member.user.id.to_string(), true);
+    embed = embed.field("ID do Usuário", member.user.id.to_string(), true);
     embed
 }
 
 pub fn message_edit(old: &str, new: &str, author: &serenity::all::User) -> CreateEmbed {
     CreateEmbed::new()
-        .title("Message Edited")
-        .field("Author", author.name.clone(), true)
-        .field("Before", old, false)
-        .field("After", new, false)
-        .colour(Colour::new(0xFFFF00))
+        .title("Mensagem Editada")
+        .field("Autor", author.name.clone(), true)
+        .field("Antes", old, false)
+        .field("Depois", new, false)
+        .colour(Colour::new(0x2B2D31))
 }
 
 pub fn message_delete(content: &str, author: &serenity::all::User, channel: &str) -> CreateEmbed {
     CreateEmbed::new()
-        .title("Message Deleted")
-        .field("Author", author.name.clone(), true)
-        .field("Channel", channel, true)
-        .field("Content", content, false)
-        .colour(Colour::new(0xFF0000))
+        .title("Mensagem Deletada")
+        .field("Autor", author.name.clone(), true)
+        .field("Canal", channel, true)
+        .field("Conteúdo", content, false)
+        .colour(Colour::new(0x2B2D31))
 }
 
 pub fn raid_detected(guild: &str, reason: &str) -> CreateEmbed {
     CreateEmbed::new()
-        .title("Raid Detected")
-        .field("Guild", guild, true)
-        .field("Reason", reason, true)
-        .colour(Colour::new(0xFF0000))
+        .title("Raid Detectada")
+        .field("Servidor", guild, true)
+        .field("Motivo", reason, true)
+        .colour(Colour::new(0x2B2D31))
 }
 
 pub fn ticket_opened(user: &serenity::all::User, channel: &str) -> CreateEmbed {
     CreateEmbed::new()
-        .title("Ticket Opened")
-        .field("User", user.name.clone(), true)
-        .field("Channel", channel, true)
-        .colour(Colour::new(0x00FF00))
+        .title("Ticket Aberto")
+        .field("Usuário", user.name.clone(), true)
+        .field("Canal", channel, true)
+        .colour(Colour::new(0x2B2D31))
 }
 
 pub fn avatar_history(user_id: &str, url: &str, page: usize, total: usize) -> CreateEmbed {
     CreateEmbed::new()
-        .title("Avatar History")
-        .field("User", user_id, true)
-        .field("Page", format!("{} / {}", page, total), true)
+        .title("Histórico de Avatares")
+        .field("Usuário", user_id, true)
+        .field("Página", format!("{} / {}", page, total), true)
         .image(url)
-        .colour(Colour::new(0x3498DB))
+        .colour(Colour::new(0x2B2D31))
 }

@@ -18,7 +18,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     let ranking = user_repo::get_voice_ranking(pool, &guild_id_str, 10).await?;
 
     if ranking.is_empty() {
-        let embed = CreateEmbed::new().title("Voice Stats").description("No voice sessions recorded yet.").colour(Colour::new(0x3498DB));
+        let embed = CreateEmbed::new().title("Voice Stats").description("No voice sessions recorded yet.").colour(Colour::new(0x2B2D31));
         interaction.edit_response(ctx, EditInteractionResponse::new().embed(embed)).await?;
         return Ok(());
     }
@@ -31,7 +31,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     let embed = CreateEmbed::new()
         .title("🏆 Voice Time Ranking")
         .description(text)
-        .colour(Colour::new(0xF1C40F));
+        .colour(Colour::new(0x2B2D31));
 
     interaction.edit_response(ctx, EditInteractionResponse::new().embed(embed)).await?;
     Ok(())

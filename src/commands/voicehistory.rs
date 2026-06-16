@@ -3,7 +3,6 @@ use sqlx::PgPool;
 use crate::cache::GuildCache;
 use crate::errors::Result;
 use crate::embeds;
-use crate::permissions;
 use crate::repositories::voice_session_repo;
 
 pub fn register(commands: &mut Vec<CreateCommand>) {
@@ -22,12 +21,14 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
 
     if sessions.is_empty() {
         let embed = embeds::info("Voice History", &format!("<@{}> has no voice sessions recorded.", target));
-        interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed).ephemeral(true))).await?;
+        let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "voicehistory", embed).await;
+        let mut msg = CreateInteractionResponseMessage::new().embed(embed).ephemeral(true);
+        if let Some(file) = attachment {
+            msg = msg.add_file(file);
+        }
+        interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
         return Ok(());
     }
-
-    let requester = interaction.user.id;
-    let is_staff = interaction.member.as_ref().map(|m| permissions::is_admin(m)).unwrap_or(false);
 
     let mut text = String::new();
     for s in &sessions {
@@ -43,9 +44,14 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     let embed = CreateEmbed::new()
         .title(format!("Voice History — {}", target))
         .description(text)
-        .colour(Colour::new(0x3498DB))
+        .colour(Colour::new(0x2B2D31))
         .footer(CreateEmbedFooter::new(format!("{} sessions shown", sessions.len())));
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "voicehistory", embed).await;
 
-    interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed))).await?;
+    let mut msg = CreateInteractionResponseMessage::new().embed(embed);
+    if let Some(file) = attachment {
+        msg = msg.add_file(file);
+    }
+    interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
     Ok(())
 }

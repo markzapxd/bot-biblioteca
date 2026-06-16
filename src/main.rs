@@ -1,8 +1,7 @@
 use serenity::all::*;
-use sqlx::PgPool;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
+mod asset_manager;
 mod cache;
 mod commands;
 mod config;
@@ -19,6 +18,7 @@ mod repositories;
 mod services;
 mod state;
 mod tests;
+mod theme;
 mod utils;
 
 use crate::state::{BotState, BotStateKey};
@@ -39,7 +39,7 @@ impl EventHandler for Handler {
         events::voice_state_update::handle(ctx, old, new).await;
     }
 
-    async fn user_update(&self, ctx: Context, old: Option<User>, new: User) {
+    async fn user_update(&self, ctx: Context, old: Option<CurrentUser>, new: CurrentUser) {
         events::user_update::handle(ctx, old, new).await;
     }
 
@@ -51,7 +51,7 @@ impl EventHandler for Handler {
         events::guild_member_remove::handle(ctx, guild_id, user, member_data).await;
     }
 
-    async fn guild_member_update(&self, ctx: Context, old: Option<Member>, new: Member) {
+    async fn guild_member_update(&self, ctx: Context, old: Option<Member>, new: Option<Member>, _event: GuildMemberUpdateEvent) {
         events::guild_member_update::handle(ctx, old, new).await;
     }
 
@@ -106,10 +106,13 @@ async fn main() {
         }
     }
 
+    let asset_manager = Arc::new(asset_manager::AssetManager::new());
+
     let bot_state = Arc::new(BotState {
         pool: pool.clone(),
         guild_cache: guild_cache.clone(),
         start_time: chrono::Utc::now(),
+        asset_manager,
     });
 
     let intents = GatewayIntents::GUILDS
@@ -138,7 +141,7 @@ async fn main() {
 
     let dashboard_state = dashboard::DashboardState {
         pool: pool.clone(),
-        http: Arc::new(client.http.clone()),
+        http: client.http.clone(),
         guild_cache: guild_cache.clone(),
         start_time: bot_state.start_time,
     };

@@ -5,7 +5,6 @@ use crate::models::Guild;
 use crate::repositories::guild_repo;
 use crate::utils::time::format_duration;
 use axum::extract::{Json, Path, State};
-use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use chrono::Utc;
@@ -139,7 +138,7 @@ async fn get_messages(
 ) -> Result<Json<Vec<MessageInfo>>> {
     let channel_id_num = channel_id.parse::<u64>()
         .map_err(|_| BotError::Validation("Invalid channel ID".into()))?;
-    let messages = state.http.get_messages(ChannelId::new(channel_id_num), "?limit=50").await
+    let messages = state.http.get_messages(ChannelId::new(channel_id_num), None, Some(50)).await
         .map_err(BotError::Discord)?;
     let infos: Vec<MessageInfo> = messages.into_iter().map(|m| MessageInfo {
         author: m.author.name,

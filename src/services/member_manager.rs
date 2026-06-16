@@ -11,7 +11,6 @@ static PENDING_REQUESTS: LazyLock<tokio::sync::Mutex<HashSet<u64>>> = LazyLock::
 
 pub async fn handle_access_request(ctx: &Context, interaction: &ComponentInteraction, guild_config: &Guild) -> Result<()> {
     let user_id = interaction.user.id.get();
-    let guild_id = interaction.guild_id.map(|g| g.get()).unwrap_or(0);
 
     if let Some(member) = &interaction.member {
         if let Some(role_id_str) = &guild_config.member_role_id {
@@ -59,8 +58,8 @@ pub async fn handle_access_request(ctx: &Context, interaction: &ComponentInterac
 }
 
 pub async fn handle_referral_selection(ctx: &Context, interaction: &ComponentInteraction, guild_config: &Guild) -> Result<()> {
-    let selected_user_id = interaction.data.values.first()
-        .and_then(|v| v.parse::<u64>().ok())
+    let selected_user_id = interaction.data.resolved.users.keys().next()
+        .map(|uid| uid.get())
         .unwrap_or(0);
 
     let is_staff_member = if let Some(guild_id) = interaction.guild_id {
@@ -86,7 +85,7 @@ pub async fn handle_referral_selection(ctx: &Context, interaction: &ComponentInt
     let embed = CreateEmbed::new()
         .title("Solicitação de Acesso")
         .description(format!("<@{}> solicitou acesso ao servidor.\nReferenciado por: <@{}>", requester_id, selected_user_id))
-        .colour(Colour::new(0x3498DB));
+        .colour(Colour::new(0x2B2D31));
 
     let approve_btn = CreateButton::new(format!("approve_{}", requester_id))
         .label("Aprovar")
@@ -129,7 +128,7 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
     }
 
     if let Some(guild_id) = interaction.guild_id {
-        if let Ok(mut member) = guild_id.member(&ctx.http, target_user_id).await {
+        if let Ok(member) = guild_id.member(&ctx.http, target_user_id).await {
             if approved {
                 if let Some(role_id_str) = &guild_config.member_role_id {
                     if let Ok(role_id_num) = role_id_str.parse::<u64>() {
@@ -142,13 +141,13 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
                 let dm_embed = CreateEmbed::new()
                     .title("Acesso Aprovado")
                     .description("Sua solicitação de acesso ao servidor foi aprovada!")
-                    .colour(Colour::new(0x00FF00));
+                    .colour(Colour::new(0x2B2D31));
                 let _ = member.user.direct_message(&ctx.http, CreateMessage::new().embed(dm_embed)).await;
             } else {
                 let dm_embed = CreateEmbed::new()
                     .title("Acesso Rejeitado")
                     .description("Sua solicitação de acesso ao servidor foi rejeitada.")
-                    .colour(Colour::new(0xFF0000));
+                    .colour(Colour::new(0x2B2D31));
                 let _ = member.user.direct_message(&ctx.http, CreateMessage::new().embed(dm_embed)).await;
             }
         }
@@ -162,9 +161,9 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
     let updated_embed = CreateEmbed::new()
         .title("Solicitação de Acesso")
         .description(format!("<@{}> - {}", target_user_id, if approved { "Aprovado" } else { "Rejeitado" }))
-        .colour(if approved { Colour::new(0x00FF00) } else { Colour::new(0xFF0000) });
+        .colour(Colour::new(0x2B2D31));
 
-    interaction.message.edit(&ctx.http, EditMessage::new().embed(updated_embed).components(vec![])).await?;
+    interaction.message.clone().edit(&ctx.http, EditMessage::new().embed(updated_embed).components(vec![])).await?;
 
     interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()

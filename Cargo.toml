@@ -21,8 +21,9 @@ tower-http = { version = "0.6", features = ["cors"] }
 dashmap = "6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 thiserror = "2"
+toml = "0.8"
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "thin"
 strip = true

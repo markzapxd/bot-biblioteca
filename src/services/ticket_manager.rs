@@ -6,6 +6,7 @@ use tracing::error;
 
 use crate::errors::Result;
 use crate::models::Guild;
+use crate::theme;
 
 static OPEN_TICKETS: LazyLock<tokio::sync::Mutex<HashMap<u64, u64>>> = LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 
@@ -13,14 +14,19 @@ pub async fn send_ticket_panel(ctx: &Context, channel_id: ChannelId) -> Result<(
     let embed = CreateEmbed::new()
         .title("Suporte")
         .description("Clique no botão abaixo para abrir um ticket de suporte.")
-        .colour(Colour::new(0x3498DB));
+        .colour(Colour::new(0x2B2D31));
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "ticketpanel", embed).await;
 
     let button = CreateButton::new("ticket_open")
         .label("REQUISITAR SUPORTE")
         .style(ButtonStyle::Primary);
     let row = CreateActionRow::Buttons(vec![button]);
 
-    channel_id.send_message(&ctx.http, CreateMessage::new().embed(embed).components(vec![row])).await?;
+    let mut msg = CreateMessage::new().embed(embed).components(vec![row]);
+    if let Some(file) = attachment {
+        msg = msg.add_file(file);
+    }
+    channel_id.send_message(&ctx.http, msg).await?;
     Ok(())
 }
 
@@ -90,14 +96,19 @@ pub async fn handle_ticket_open(ctx: &Context, interaction: &ComponentInteractio
     let embed = CreateEmbed::new()
         .title("Ticket Aberto")
         .description(format!("Bem-vindo ao seu ticket, <@{}>!\nDescreva seu problema e aguarde um membro da staff.", user_id))
-        .colour(Colour::new(0x00FF00));
+        .colour(Colour::new(0x2B2D31));
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "ticket", embed).await;
 
     let close_btn = CreateButton::new("ticket_close")
         .label("Fechar Ticket")
         .style(ButtonStyle::Danger);
     let row = CreateActionRow::Buttons(vec![close_btn]);
 
-    channel.send_message(&ctx.http, CreateMessage::new().embed(embed).components(vec![row])).await?;
+    let mut msg = CreateMessage::new().embed(embed).components(vec![row]);
+    if let Some(file) = attachment {
+        msg = msg.add_file(file);
+    }
+    channel.send_message(&ctx.http, msg).await?;
 
     interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
@@ -112,7 +123,8 @@ pub async fn handle_ticket_close_request(ctx: &Context, interaction: &ComponentI
     let embed = CreateEmbed::new()
         .title("Fechar Ticket")
         .description("Tem certeza que deseja fechar este ticket?")
-        .colour(Colour::new(0xFF0000));
+        .colour(Colour::new(0x2B2D31));
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "ticket", embed).await;
 
     let confirm_btn = CreateButton::new("ticket_close_confirm")
         .label("Sim, Fechar")
@@ -122,12 +134,14 @@ pub async fn handle_ticket_close_request(ctx: &Context, interaction: &ComponentI
         .style(ButtonStyle::Secondary);
     let row = CreateActionRow::Buttons(vec![confirm_btn, cancel_btn]);
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new()
-            .embed(embed)
-            .components(vec![row])
-            .ephemeral(true)
-    )).await?;
+    let mut msg = CreateInteractionResponseMessage::new()
+        .embed(embed)
+        .components(vec![row])
+        .ephemeral(true);
+    if let Some(file) = attachment {
+        msg = msg.add_file(file);
+    }
+    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(msg)).await?;
 
     Ok(())
 }
@@ -153,5 +167,74 @@ pub async fn handle_ticket_close_confirm(ctx: &Context, interaction: &ComponentI
         error!("Failed to delete ticket channel {}: {}", channel_id, e);
     }
 
+    Ok(())
+}
+
+pub async fn handle_close_ticket_command(ctx: &Context, interaction: &CommandInteraction, target_user_id: UserId) -> Result<()> {
+    let channel_id = {
+        let tickets = OPEN_TICKETS.lock().await;
+        tickets.get(&target_user_id.get()).copied()
+    };
+
+    match channel_id {
+        Some(cid) => {
+            if let Err(e) = ChannelId::new(cid).delete(&ctx.http).await {
+                error!("Failed to delete ticket channel {}: {}", cid, e);
+            }
+            {
+                let mut tickets = OPEN_TICKETS.lock().await;
+                tickets.remove(&target_user_id.get());
+            }
+            let embed = theme::success("Ticket Fechado", &format!("Ticket de <@{}> foi fechado.", target_user_id.get()));
+            let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "closeticket", embed).await;
+            let mut msg = CreateInteractionResponseMessage::new().embed(embed);
+            if let Some(file) = attachment {
+                msg = msg.add_file(file);
+            }
+            interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
+        }
+        None => {
+            let embed = theme::info("Ticket", &format!("<@{}> nao possui ticket aberto.", target_user_id.get()));
+            let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "ticket", embed).await;
+            let mut msg = CreateInteractionResponseMessage::new().embed(embed).ephemeral(true);
+            if let Some(file) = attachment {
+                msg = msg.add_file(file);
+            }
+            interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn handle_add_user_to_ticket(ctx: &Context, interaction: &CommandInteraction, target: UserId) -> Result<()> {
+    let channel = interaction.channel_id;
+    channel.create_permission(&ctx.http, PermissionOverwrite {
+        kind: PermissionOverwriteType::Member(target),
+        allow: Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES,
+        deny: Permissions::empty(),
+    }).await?;
+
+    let embed = theme::success("Usuario Adicionado", &format!("<@{}> foi adicionado ao ticket.", target.get()));
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "addticket", embed).await;
+    let mut msg = CreateInteractionResponseMessage::new().embed(embed);
+    if let Some(file) = attachment {
+        msg = msg.add_file(file);
+    }
+    interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
+    Ok(())
+}
+
+pub async fn handle_remove_user_from_ticket(ctx: &Context, interaction: &CommandInteraction, target: UserId) -> Result<()> {
+    let channel = interaction.channel_id;
+
+    channel.delete_permission(&ctx.http, PermissionOverwriteType::Member(target)).await?;
+
+    let embed = theme::success("Usuario Removido", &format!("<@{}> foi removido do ticket.", target.get()));
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "removeticket", embed).await;
+    let mut msg = CreateInteractionResponseMessage::new().embed(embed);
+    if let Some(file) = attachment {
+        msg = msg.add_file(file);
+    }
+    interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
     Ok(())
 }

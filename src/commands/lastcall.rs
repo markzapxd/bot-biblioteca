@@ -22,16 +22,26 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
         Some(s) => {
             let embed = CreateEmbed::new()
                 .title("Last Voice Session")
-                .colour(Colour::new(0x3498DB))
+                .colour(Colour::new(0x2B2D31))
                 .field("Channel", &s.channel_name, true)
                 .field("Duration", s.duration_formatted(), true)
                 .field("Joined", s.joined_at.format("%Y-%m-%d %H:%M").to_string(), true)
                 .field("Left", s.left_at.map(|d| d.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_else(|| "Active".into()), true);
-            interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed))).await?;
+            let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "lastcall", embed).await;
+            let mut msg = CreateInteractionResponseMessage::new().embed(embed);
+            if let Some(file) = attachment {
+                msg = msg.add_file(file);
+            }
+            interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
         }
         None => {
             let embed = embeds::info("No Sessions", &format!("<@{}> has no voice sessions recorded.", target));
-            interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed).ephemeral(true))).await?;
+            let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "lastcall", embed).await;
+            let mut msg = CreateInteractionResponseMessage::new().embed(embed).ephemeral(true);
+            if let Some(file) = attachment {
+                msg = msg.add_file(file);
+            }
+            interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
         }
     }
     Ok(())

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -21,7 +22,7 @@ const LOCKDOWN_DURATION: Duration = Duration::from_secs(300);
 const NEW_ACCOUNT_DAYS: i64 = 7;
 
 struct JoinEvent {
-    user_id: u64,
+    _user_id: u64,
     guild_id: u64,
     timestamp: Instant,
 }
@@ -33,27 +34,26 @@ struct RaidState {
 }
 
 static JOIN_TRACKER: Mutex<Vec<JoinEvent>> = Mutex::new(Vec::new());
-static MESSAGE_TRACKER: Mutex<HashMap<u64, Vec<Instant>>> = Mutex::new(HashMap::new());
-static RAID_STATUS: Mutex<HashMap<u64, RaidState>> = Mutex::new(HashMap::new());
+static MESSAGE_TRACKER: LazyLock<Mutex<HashMap<u64, Vec<Instant>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static RAID_STATUS: LazyLock<Mutex<HashMap<u64, RaidState>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub async fn detect_join_raid(ctx: &Context, member: &Member, guild_config: &Guild) -> Result<()> {
     let now = Instant::now();
     let user_id = member.user.id.get();
-    let guild_id = member.guild_id.map(|g| g.get()).unwrap_or(0);
+    let guild_id = member.guild_id.get();
 
-    {
+    let (should_trigger, recent_joins) = {
         let mut tracker = JOIN_TRACKER.lock().unwrap();
         tracker.retain(|e| now.duration_since(e.timestamp) < MASS_JOIN_INTERVAL);
-        tracker.push(JoinEvent { user_id, guild_id, timestamp: now });
+        tracker.push(JoinEvent { _user_id: user_id, guild_id, timestamp: now });
 
-        let recent_joins = tracker.iter().filter(|e| e.guild_id == guild_id).count();
-        if recent_joins >= MASS_JOIN_THRESHOLD {
-            drop(tracker);
-            let reason = format!("Mass join detected: {} joins in {:?}", recent_joins, MASS_JOIN_INTERVAL);
-            if let Some(gid) = member.guild_id {
-                trigger_raid(ctx, gid, &reason, guild_config).await?;
-            }
-        }
+        let count = tracker.iter().filter(|e| e.guild_id == guild_id).count();
+        (count >= MASS_JOIN_THRESHOLD, count)
+    };
+
+    if should_trigger {
+        let reason = format!("Mass join detected: {} joins in {:?}", recent_joins, MASS_JOIN_INTERVAL);
+        trigger_raid(ctx, member.guild_id, &reason, guild_config).await?;
     }
 
     if is_raid_active(guild_id) {
@@ -72,8 +72,10 @@ pub async fn detect_message_violation(ctx: &Context, message: &Message, guild_co
     let mention_count = message.mentions.len();
     if mention_count >= MASS_MENTION_THRESHOLD {
         let reason = format!("Mass mention detected: {} mentions", mention_count);
-        if let Some(member) = message.member.as_ref() {
-            punish(ctx, member, &reason, guild_config).await?;
+        if let Some(guild_id) = message.guild_id {
+            if let Ok(full_member) = guild_id.member(&ctx.http, message.author.id).await {
+                punish(ctx, &full_member, &reason, guild_config).await?;
+            }
         }
         return Ok(());
     }
@@ -81,24 +83,29 @@ pub async fn detect_message_violation(ctx: &Context, message: &Message, guild_co
     let emoji_count = count_emojis(&message.content);
     if emoji_count >= MASS_EMOJI_THRESHOLD {
         let reason = format!("Mass emoji detected: {} emojis", emoji_count);
-        if let Some(member) = message.member.as_ref() {
-            punish(ctx, member, &reason, guild_config).await?;
+        if let Some(guild_id) = message.guild_id {
+            if let Ok(full_member) = guild_id.member(&ctx.http, message.author.id).await {
+                punish(ctx, &full_member, &reason, guild_config).await?;
+            }
         }
         return Ok(());
     }
 
-    {
+    let is_spam = {
         let mut tracker = MESSAGE_TRACKER.lock().unwrap();
         let timestamps = tracker.entry(user_id).or_insert_with(Vec::new);
         let now = Instant::now();
         timestamps.retain(|t| now.duration_since(*t) < SPAM_INTERVAL);
         timestamps.push(now);
 
-        if timestamps.len() >= SPAM_THRESHOLD {
-            drop(tracker);
-            let reason = format!("Spam detected: {} messages in {:?}", timestamps.len(), SPAM_INTERVAL);
-            if let Some(member) = message.member.as_ref() {
-                punish(ctx, member, &reason, guild_config).await?;
+        timestamps.len() >= SPAM_THRESHOLD
+    };
+
+    if is_spam {
+        let reason = format!("Spam detected: {} messages in {:?}", SPAM_THRESHOLD, SPAM_INTERVAL);
+        if let Some(guild_id) = message.guild_id {
+            if let Ok(full_member) = guild_id.member(&ctx.http, message.author.id).await {
+                punish(ctx, &full_member, &reason, guild_config).await?;
             }
         }
     }
@@ -135,24 +142,33 @@ pub async fn trigger_raid(ctx: &Context, guild: GuildId, reason: &str, guild_con
     };
 
     let embed = crate::embeds::raid_detected(&guild_name, reason);
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "raidmode", embed).await;
     if let Some(log_channel_id) = &guild_config.log_channel_id {
         if let Ok(channel_id) = log_channel_id.parse::<u64>() {
-            let _ = ChannelId::new(channel_id).send_message(&ctx.http, CreateMessage::new().embed(embed)).await;
+            let mut msg = CreateMessage::new().embed(embed);
+            if let Some(file) = attachment {
+                msg = msg.add_file(file);
+            }
+            let _ = ChannelId::new(channel_id).send_message(&ctx.http, msg).await;
         }
     }
 
     if AUTO_LOCKDOWN {
-        if let Some(guild_obj) = guild.to_guild_cached(ctx) {
-            let _ = apply_lockdown(ctx, &guild_obj, true).await;
+        let guild_clone = guild.to_guild_cached(ctx).map(|g| g.clone());
+        if let Some(guild_clone) = guild_clone {
+            let _ = apply_lockdown(ctx, &guild_clone, true).await;
         } else if let Ok(guild_obj) = guild.to_partial_guild(&ctx.http).await {
             let _ = apply_lockdown_partial(ctx, &guild_obj, true).await;
         }
     }
 
-    let ctx_clone = ctx.clone();
+    let gid = guild.get();
     tokio::spawn(async move {
         tokio::time::sleep(LOCKDOWN_DURATION).await;
-        let _ = disable_raid_mode(&ctx_clone, guild).await;
+        let mut status = RAID_STATUS.lock().unwrap();
+        if let Some(state) = status.get_mut(&gid) {
+            state.active = false;
+        }
     });
 
     Ok(())
@@ -168,8 +184,9 @@ pub async fn disable_raid_mode(ctx: &Context, guild_id: GuildId) -> Result<()> {
         }
     }
 
-    if let Some(guild_obj) = guild_id.to_guild_cached(ctx) {
-        let _ = apply_lockdown(ctx, &guild_obj, false).await;
+    let guild_clone = guild_id.to_guild_cached(ctx).map(|g| g.clone());
+    if let Some(guild_clone) = guild_clone {
+        let _ = apply_lockdown(ctx, &guild_clone, false).await;
     } else if let Ok(guild_obj) = guild_id.to_partial_guild(&ctx.http).await {
         let _ = apply_lockdown_partial(ctx, &guild_obj, false).await;
     }
@@ -183,7 +200,8 @@ pub fn is_raid_active(guild_id: u64) -> bool {
 }
 
 pub async fn punish(ctx: &Context, member: &Member, reason: &str, guild_config: &Guild) -> Result<()> {
-    if crate::permissions::is_immune(member, guild_config) {
+    let member_id = member.user.id.get();
+    if crate::permissions::is_immune(member_id, member, guild_config) {
         return Ok(());
     }
 
@@ -196,11 +214,8 @@ pub async fn punish(ctx: &Context, member: &Member, reason: &str, guild_config: 
             match Timestamp::from_unix_timestamp(future) {
                 Ok(until) => {
                     let edit = EditMember::new().disable_communication_until_datetime(until);
-                    if let Some(guild_id) = member.guild_id {
-                        guild_id.edit_member(&ctx.http, member.user.id, edit).await
-                    } else {
-                        Ok(())
-                    }
+                    member.guild_id.edit_member(&ctx.http, member.user.id, edit).await?;
+                    Ok(())
                 }
                 Err(e) => {
                     error!("Invalid timeout timestamp: {}", e);
@@ -217,9 +232,14 @@ pub async fn punish(ctx: &Context, member: &Member, reason: &str, guild_config: 
     }
 
     let embed = crate::embeds::warning("Punishment Applied", &format!("User: {}\nAction: {}\nReason: {}", member.user.name, DEFAULT_ACTION, reason));
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "raidmode", embed).await;
     if let Some(log_channel_id) = &guild_config.log_channel_id {
         if let Ok(channel_id) = log_channel_id.parse::<u64>() {
-            let _ = ChannelId::new(channel_id).send_message(&ctx.http, CreateMessage::new().embed(embed)).await;
+            let mut msg = CreateMessage::new().embed(embed);
+            if let Some(file) = attachment {
+                msg = msg.add_file(file);
+            }
+            let _ = ChannelId::new(channel_id).send_message(&ctx.http, msg).await;
         }
     }
 
@@ -230,7 +250,7 @@ pub async fn apply_lockdown(ctx: &Context, guild: &serenity::all::Guild, enable:
     let everyone_role_id = RoleId::new(guild.id.get());
     let channels = guild.channels(&ctx.http).await?;
 
-    for (_, channel) in channels {
+    for (_, mut channel) in channels {
         if channel.kind == ChannelType::Text {
             let mut overwrites = channel.permission_overwrites.clone();
             let idx = overwrites.iter().position(|o| {
@@ -277,7 +297,7 @@ async fn apply_lockdown_partial(ctx: &Context, guild: &PartialGuild, enable: boo
     let everyone_role_id = RoleId::new(guild.id.get());
     let channels = guild.channels(&ctx.http).await?;
 
-    for (_, channel) in channels {
+    for (_, mut channel) in channels {
         if channel.kind == ChannelType::Text {
             let mut overwrites = channel.permission_overwrites.clone();
             let idx = overwrites.iter().position(|o| {

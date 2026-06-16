@@ -34,23 +34,39 @@ pub fn is_staff(member: &Member, guild_config: &Guild) -> bool {
 
 pub fn require_owner(user_id: u64) -> Result<()> {
     if !is_owner(user_id) {
-        return Err(BotError::Unauthorized("Owner only".to_string()));
+        return Err(BotError::Unauthorized("Apenas o dono do bot".to_string()));
     }
     Ok(())
 }
 
-pub fn require_admin(member: &Member) -> Result<()> {
-    if !is_admin(member) {
-        return Err(BotError::Unauthorized("Admin only".to_string()));
+pub fn require_admin(user_id: u64, member: &Member) -> Result<()> {
+    if is_owner(user_id) || is_admin(member) {
+        return Ok(());
     }
-    Ok(())
+    Err(BotError::Unauthorized("Apenas administradores".to_string()))
 }
 
-pub fn is_immune(member: &Member, guild_config: &Guild) -> bool {
-    if let Some(owner_id) = member.guild_id.map(|g| g.get()) {
-        if member.user.id.get() == owner_id {
-            return true;
-        }
+pub fn require_moderator(user_id: u64, member: &Member) -> Result<()> {
+    if is_owner(user_id) || is_moderator(member) {
+        return Ok(());
     }
-    is_admin(member)
+    Err(BotError::Unauthorized("Apenas moderadores".to_string()))
+}
+
+pub fn require_staff(user_id: u64, member: &Member, guild_config: &Guild) -> Result<()> {
+    if is_owner(user_id) || is_staff(member, guild_config) {
+        return Ok(());
+    }
+    Err(BotError::Unauthorized("Apenas membros da staff".to_string()))
+}
+
+pub fn require_admin_or_staff(user_id: u64, member: &Member, guild_config: &Guild) -> Result<()> {
+    if is_owner(user_id) || is_admin(member) || is_staff(member, guild_config) {
+        return Ok(());
+    }
+    Err(BotError::Unauthorized("Apenas administradores ou staff".to_string()))
+}
+
+pub fn is_immune(user_id: u64, member: &Member, _guild_config: &Guild) -> bool {
+    is_owner(user_id) || is_admin(member)
 }

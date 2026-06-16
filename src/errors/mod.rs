@@ -28,6 +28,12 @@ pub enum BotError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Asset not found: {0}")]
+    AssetNotFound(String),
+
+    #[error("Config parse error: {0}")]
+    ConfigParse(String),
 }
 
 pub type Result<T> = std::result::Result<T, BotError>;

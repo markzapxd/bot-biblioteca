@@ -59,7 +59,7 @@ pub async fn build_user_info(
         .field("Conta Criada", account_created.format("%d/%m/%Y %H:%M").to_string(), true)
         .field("Privado", if is_private { "Sim" } else { "Não" }, true)
         .field("Tempo em Voz", voice_formatted, true)
-        .colour(Colour::new(0x3498DB));
+        .colour(Colour::new(0x2B2D31));
 
     if let Some(joined) = guild_join_date {
         embed = embed.field("Entrou no Servidor", joined.format("%d/%m/%Y %H:%M").to_string(), true);

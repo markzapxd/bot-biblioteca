@@ -1,0 +1,28 @@
+services:
+  bot:
+    build:
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/app
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target-cache:/app/target
+    environment:
+      RUST_LOG: debug
+    develop:
+      watch:
+        - action: rebuild
+          path: Cargo.toml
+        - action: rebuild
+          path: Cargo.lock
+        - action: sync+restart
+          path: src/
+          target: /app/src/
+        - action: sync+restart
+          path: migrations/
+          target: /app/migrations/
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  target-cache:

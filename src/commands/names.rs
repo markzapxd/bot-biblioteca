@@ -24,7 +24,12 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
         let is_staff = interaction.member.as_ref().map(|m| permissions::is_admin(m)).unwrap_or(false);
         if requester != target && !is_staff && !permissions::is_owner(requester.get()) {
             let embed = embeds::warning("Private", "This user has privacy mode enabled.");
-            interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed).ephemeral(true))).await?;
+            let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "names", embed).await;
+            let mut msg = CreateInteractionResponseMessage::new().embed(embed).ephemeral(true);
+            if let Some(file) = attachment {
+                msg = msg.add_file(file);
+            }
+            interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
             return Ok(());
         }
     }
@@ -32,7 +37,12 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     let history = user.get_username_history();
     if history.is_empty() {
         let embed = embeds::info("Username History", &format!("<@{}> has no recorded name changes.", target));
-        interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed))).await?;
+        let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "names", embed).await;
+        let mut msg = CreateInteractionResponseMessage::new().embed(embed);
+        if let Some(file) = attachment {
+            msg = msg.add_file(file);
+        }
+        interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
         return Ok(());
     }
 
@@ -44,9 +54,14 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     let embed = CreateEmbed::new()
         .title(format!("Username History — {}", target))
         .description(text)
-        .colour(Colour::new(0x3498DB));
+        .colour(Colour::new(0x2B2D31));
+    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "names", embed).await;
 
-    interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed))).await?;
+    let mut msg = CreateInteractionResponseMessage::new().embed(embed);
+    if let Some(file) = attachment {
+        msg = msg.add_file(file);
+    }
+    interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
     Ok(())
 }
 

@@ -40,7 +40,7 @@ pub async fn log_message_delete(ctx: &Context, content: &str, author_name: &str,
         .field("Author", author_name, true)
         .field("Channel", channel_name, true)
         .field("Content", content, false)
-        .colour(Colour::new(0xFF0000));
+        .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, pool).await
 }
 
@@ -75,7 +75,7 @@ pub async fn log_member_update(ctx: &Context, old_roles: &[RoleId], new_roles: &
     let embed = CreateEmbed::new()
         .title("Member Updated")
         .description(description)
-        .colour(Colour::new(0xFFFF00));
+        .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, pool).await
 }
 
@@ -84,7 +84,7 @@ pub async fn log_voice_join(ctx: &Context, user_name: &str, channel_name: &str, 
         .title("Voice Channel Join")
         .field("User", user_name, true)
         .field("Channel", channel_name, true)
-        .colour(Colour::new(0x00FF00));
+        .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, pool).await
 }
 
@@ -94,6 +94,6 @@ pub async fn log_voice_leave(ctx: &Context, user_name: &str, channel_name: &str,
         .field("User", user_name, true)
         .field("Channel", channel_name, true)
         .field("Duration", crate::utils::time::format_duration(duration), true)
-        .colour(Colour::new(0xFF0000));
+        .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, pool).await
 }

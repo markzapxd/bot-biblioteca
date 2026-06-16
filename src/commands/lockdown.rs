@@ -17,7 +17,8 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
 pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
     let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let member = interaction.member.as_ref().ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
-    permissions::require_admin(member)?;
+    let user_id = interaction.user.id.get();
+    permissions::require_admin(user_id, member)?;
 
     let role_id = interaction.data.options.iter().find(|o| o.name == "role").and_then(|o| o.value.as_role_id()).ok_or(crate::errors::BotError::Validation("Role required".into()))?;
 
@@ -25,7 +26,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
 
     let members = guild_id.members(ctx, None, None).await.unwrap_or_default();
     let mut count = 0u32;
-    for mut m in members {
+    for m in members {
         if !m.roles.contains(&role_id) {
             if m.add_role(ctx, role_id).await.is_ok() {
                 count += 1;

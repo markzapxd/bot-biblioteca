@@ -1,6 +1,7 @@
 use crate::models::Guild;
 use dashmap::DashMap;
 
+#[derive(Clone)]
 pub struct GuildCache {
     inner: DashMap<String, Guild>,
 }

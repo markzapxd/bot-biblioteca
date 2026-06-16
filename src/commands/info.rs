@@ -16,12 +16,12 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
 
     let embed = CreateEmbed::new()
         .title(&guild.name)
-        .colour(Colour::new(0x3498DB))
-        .field("Members", guild.member_count.to_string(), true)
+        .colour(Colour::new(0x2B2D31))
+        .field("Members", guild.approximate_member_count.unwrap_or(0).to_string(), true)
         .field("Channels", channels.len().to_string(), true)
         .field("Roles", roles.len().to_string(), true)
         .field("Created", guild.id.created_at().format("%Y-%m-%d").to_string(), true)
-        .field("Boost Level", guild.premium_tier.num().to_string(), true)
+        .field("Boost Level", (u8::from(guild.premium_tier)).to_string(), true)
         .thumbnail(guild.icon_url().unwrap_or_default());
 
     interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed))).await?;

@@ -1,6 +1,6 @@
-use serenity::all::{Context, User};
+use serenity::all::{Context, CurrentUser};
 
-pub async fn handle(ctx: Context, old: Option<User>, new: User) {
+pub async fn handle(ctx: Context, old: Option<CurrentUser>, new: CurrentUser) {
     if let Some(state) = ctx.data.read().await.get::<crate::state::BotStateKey>() {
         let pool = &state.pool;
         let user_id = new.id.to_string();
@@ -13,7 +13,7 @@ pub async fn handle(ctx: Context, old: Option<User>, new: User) {
             if let Some(old_user) = old {
                 if old_user.name != new.name {
                     username_history.push(crate::models::UsernameEntry {
-                        name: old_user.name,
+                        name: old_user.name.clone(),
                         date: chrono::Utc::now(),
                     });
                     updated = true;
