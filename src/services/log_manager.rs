@@ -74,23 +74,26 @@ pub async fn log_member_update(ctx: &Context, old_roles: &[RoleId], new_roles: &
 
     let embed = CreateEmbed::new()
         .title("Member Updated")
+        .thumbnail(member.user.face())
         .description(description)
         .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, pool).await
 }
 
-pub async fn log_voice_join(ctx: &Context, user_name: &str, channel_name: &str, guild_id: u64, pool: &PgPool) -> Result<()> {
+pub async fn log_voice_join(ctx: &Context, user_name: &str, avatar_url: &str, channel_name: &str, guild_id: u64, pool: &PgPool) -> Result<()> {
     let embed = CreateEmbed::new()
         .title("Voice Channel Join")
+        .thumbnail(avatar_url)
         .field("User", user_name, true)
         .field("Channel", channel_name, true)
         .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, pool).await
 }
 
-pub async fn log_voice_leave(ctx: &Context, user_name: &str, channel_name: &str, duration: i64, guild_id: u64, pool: &PgPool) -> Result<()> {
+pub async fn log_voice_leave(ctx: &Context, user_name: &str, avatar_url: &str, channel_name: &str, duration: i64, guild_id: u64, pool: &PgPool) -> Result<()> {
     let embed = CreateEmbed::new()
         .title("Voice Channel Leave")
+        .thumbnail(avatar_url)
         .field("User", user_name, true)
         .field("Channel", channel_name, true)
         .field("Duration", crate::utils::time::format_duration(duration), true)

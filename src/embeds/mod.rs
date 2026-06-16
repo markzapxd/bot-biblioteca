@@ -56,6 +56,7 @@ pub fn voice_session(session: &VoiceSession) -> CreateEmbed {
 pub fn member_join(member: &serenity::all::Member) -> CreateEmbed {
     let mut embed = CreateEmbed::new()
         .title("Membro Entrou")
+        .thumbnail(member.user.face())
         .colour(Colour::new(0x2B2D31));
     if let Some(user) = &member.user.global_name {
         embed = embed.field("Usuário", user, true);
@@ -67,6 +68,7 @@ pub fn member_join(member: &serenity::all::Member) -> CreateEmbed {
 pub fn member_leave(member: &serenity::all::Member) -> CreateEmbed {
     let mut embed = CreateEmbed::new()
         .title("Membro Saiu")
+        .thumbnail(member.user.face())
         .colour(Colour::new(0x2B2D31));
     if let Some(user) = &member.user.global_name {
         embed = embed.field("Usuário", user, true);
@@ -78,6 +80,7 @@ pub fn member_leave(member: &serenity::all::Member) -> CreateEmbed {
 pub fn message_edit(old: &str, new: &str, author: &serenity::all::User) -> CreateEmbed {
     CreateEmbed::new()
         .title("Mensagem Editada")
+        .thumbnail(author.face())
         .field("Autor", author.name.clone(), true)
         .field("Antes", old, false)
         .field("Depois", new, false)
@@ -87,6 +90,7 @@ pub fn message_edit(old: &str, new: &str, author: &serenity::all::User) -> Creat
 pub fn message_delete(content: &str, author: &serenity::all::User, channel: &str) -> CreateEmbed {
     CreateEmbed::new()
         .title("Mensagem Deletada")
+        .thumbnail(author.face())
         .field("Autor", author.name.clone(), true)
         .field("Canal", channel, true)
         .field("Conteúdo", content, false)

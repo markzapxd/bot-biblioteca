@@ -31,7 +31,7 @@ pub async fn handle(ctx: Context, old: Option<VoiceState>, new: VoiceState) {
                 if let Err(e) = crate::repositories::user_repo::add_voice_time(pool, &user_id, duration).await {
                     tracing::error!("Failed to add voice time: {}", e);
                 }
-                let _ = crate::services::log_manager::log_voice_leave(&ctx, &user_name, &channel_name, duration, guild_id_num, pool).await;
+                let _ = crate::services::log_manager::log_voice_leave(&ctx, &user_name, &new.member.as_ref().map(|m| m.user.face()).unwrap_or_default(), &channel_name, duration, guild_id_num, pool).await;
             }
         } else if new_channel.is_some() && old_channel != new_channel {
             let channel_id = new_channel.unwrap().to_string();
@@ -40,7 +40,7 @@ pub async fn handle(ctx: Context, old: Option<VoiceState>, new: VoiceState) {
             if let Err(e) = crate::repositories::voice_session_repo::create(pool, &user_id, &guild_id, None, &channel_id, &channel_name, now).await {
                 tracing::error!("Failed to create voice session: {}", e);
             }
-            let _ = crate::services::log_manager::log_voice_join(&ctx, &user_name, &channel_name, guild_id_num, pool).await;
+            let _ = crate::services::log_manager::log_voice_join(&ctx, &user_name, &new.member.as_ref().map(|m| m.user.face()).unwrap_or_default(), &channel_name, guild_id_num, pool).await;
         }
     }
 }

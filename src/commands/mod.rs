@@ -15,7 +15,6 @@ pub mod nuke;
 pub mod privacy;
 pub mod raidmode;
 pub mod removeticket;
-pub mod setup;
 pub mod shutdown;
 pub mod stats;
 pub mod sync;
@@ -46,7 +45,6 @@ pub async fn register_all(commands: &mut Vec<CreateCommand>) {
     privacy::register(commands);
     raidmode::register(commands);
     removeticket::register(commands);
-    setup::register(commands);
     shutdown::register(commands);
     stats::register(commands);
     sync::register(commands);
@@ -75,7 +73,6 @@ pub async fn route(ctx: &Context, interaction: &CommandInteraction, state: &BotS
         "privacy" | "privacidade" => privacy::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "raidmode" | "modoraid" => raidmode::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "removeticket" => removeticket::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
-        "setup" | "configurar" => setup::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "shutdown" => shutdown::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "stats" | "ranking" => stats::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "sync" => sync::handle(ctx, interaction, &state.pool, &state.guild_cache).await,

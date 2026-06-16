@@ -73,29 +73,11 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 _ if custom_id.starts_with("modules_toggle_") => {
                     crate::commands::modulos::handle_toggle(&ctx, &component, &state.pool, &state.guild_cache).await
                 }
-                _ if custom_id == "setup_verificacao" => {
-                    crate::commands::setup::handle_verificacao(&ctx, &component, &state.pool).await
+                _ if custom_id == "lockdown_full_setup" => {
+                    crate::commands::lockdown::handle_full_setup(&ctx, &component, &state.pool).await
                 }
-                _ if custom_id == "setup_logs" => {
-                    crate::commands::setup::handle_logs(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "setup_setrole" => {
-                    crate::commands::setup::handle_setrole_click(&ctx, &component).await
-                }
-                _ if custom_id == "setup_roletype_select" => {
-                    crate::commands::setup::handle_setrole_type_select(&ctx, &component).await
-                }
-                _ if custom_id.starts_with("setup_roleselect_") => {
-                    crate::commands::setup::handle_role_select(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "setup_setchannel" => {
-                    crate::commands::setup::handle_setchannel_click(&ctx, &component).await
-                }
-                _ if custom_id == "setup_channeltype_select" => {
-                    crate::commands::setup::handle_setchannel_type_select(&ctx, &component).await
-                }
-                _ if custom_id.starts_with("setup_channelsel_") => {
-                    crate::commands::setup::handle_channel_select(&ctx, &component, &state.pool).await
+                _ if custom_id == "lockdown_toggle" => {
+                    crate::commands::lockdown::handle_toggle(&ctx, &component, &state.pool).await
                 }
                 _ if custom_id.starts_with("avatar_") => {
                     let parts: Vec<&str> = custom_id.split('_').collect();

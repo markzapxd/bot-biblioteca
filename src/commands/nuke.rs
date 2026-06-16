@@ -52,8 +52,8 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
 
         let _ = channel_id.delete(ctx).await;
 
-        let embed = theme::success("Canal Recriado", &format!("Canal **#{}** foi clonado e recriado no mesmo local.", name));
-        let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "nuke", embed).await;
+        let embed = theme::success("Canal Recriado", &format!("Canal #{} foi nuka btw", name));
+        let (embed, attachment) = crate::asset_manager::prepare_embed_large(ctx, "nuke", embed).await;
         let mut msg = CreateMessage::new().embed(embed);
         if let Some(file) = attachment {
             msg = msg.add_file(file);
