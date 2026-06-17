@@ -14,9 +14,27 @@ pub async fn handle(ctx: Context, msg: Message) {
     if let Some(state) = ctx.data.read().await.get::<crate::state::BotStateKey>() {
         let pool = &state.pool;
         if let Some(guild_id) = msg.guild_id {
-            if let Ok(Some(guild_config)) = crate::repositories::guild_repo::find_by_id(pool, &guild_id.to_string()).await {
-                let _ = crate::services::anti_raid::detect_message_violation(&ctx, &msg, &guild_config).await;
-            }
+            let guild_id_str = guild_id.to_string();
+            let guild_config = if let Some(config) = state.guild_cache.get(&guild_id_str) {
+                config
+            } else {
+                let config = match crate::repositories::guild_repo::find_by_id(pool, &guild_id_str).await {
+                    Ok(Some(c)) => c,
+                    _ => {
+                        match crate::repositories::guild_repo::upsert(pool, &guild_id_str).await {
+                            Ok(c) => c,
+                            Err(e) => {
+                                tracing::error!("Failed to upsert guild config for message: {:?}", e);
+                                return;
+                            }
+                        }
+                    }
+                };
+                state.guild_cache.set(guild_id_str.clone(), config.clone());
+                config
+            };
+
+            let _ = crate::services::anti_raid::detect_message_violation(&ctx, &msg, &guild_config).await;
         }
     }
 }

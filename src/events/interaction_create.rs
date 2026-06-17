@@ -211,6 +211,51 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 _ if custom_id == "help_back" => {
                     crate::commands::help::handle_back(&ctx, &component).await
                 }
+                _ if custom_id == "cfg_roles" => {
+                    crate::commands::config::handle_roles_button(&ctx, &component, &state).await
+                }
+                _ if custom_id == "cfg_channels" => {
+                    crate::commands::config::handle_channels_button(&ctx, &component, &state).await
+                }
+                _ if custom_id == "cfg_back" => {
+                    crate::commands::config::handle_back_button(&ctx, &component, &state).await
+                }
+                _ if custom_id.starts_with("cfg_role_") => {
+                    crate::commands::config::handle_role_select(&ctx, &component, &state).await
+                }
+                _ if custom_id.starts_with("cfg_channel_") => {
+                    crate::commands::config::handle_channel_select(&ctx, &component, &state).await
+                }
+                _ if custom_id == "card_action_create" => {
+                    crate::commands::card::handle_create_button(&ctx, &component).await
+                }
+                _ if custom_id == "card_action_edit" => {
+                    crate::commands::card::handle_edit_button(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "card_action_send" => {
+                    crate::commands::card::handle_send_button(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "card_action_preview" => {
+                    crate::commands::card::handle_preview_button(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "card_action_delete" => {
+                    crate::commands::card::handle_delete_button(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "card_action_back" => {
+                    crate::commands::card::handle_back_button(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "card_select_edit" => {
+                    crate::commands::card::handle_select_edit(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "card_select_send" => {
+                    crate::commands::card::handle_select_send(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "card_select_preview" => {
+                    crate::commands::card::handle_select_preview(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "card_select_delete" => {
+                    crate::commands::card::handle_select_delete(&ctx, &component, &state.pool).await
+                }
                 _ => Ok(()),
             };
 
@@ -270,6 +315,12 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
             let result = match custom_id.as_str() {
                 "referral_modal" => {
                     crate::services::member_manager::handle_referral_modal_submit(&ctx, &modal_submit, &guild_config).await
+                }
+                "card_create" => {
+                    crate::commands::card::handle_modal_submit(&ctx, &modal_submit, &state.pool).await
+                }
+                _ if custom_id.starts_with("card_edit_") => {
+                    crate::commands::card::handle_modal_submit(&ctx, &modal_submit, &state.pool).await
                 }
                 _ => Ok(()),
             };

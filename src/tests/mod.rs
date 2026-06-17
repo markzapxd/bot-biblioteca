@@ -70,3 +70,23 @@ mod permission_tests {
         assert!(!permissions::is_owner(123456789));
     }
 }
+
+#[cfg(test)]
+mod db_tests {
+    use sqlx::PgPool;
+
+    #[tokio::test]
+    async fn print_db_cards() {
+        dotenvy::dotenv().ok();
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://bibliotecario:bibliotecario@localhost:5432/bibliotecario".to_string());
+        println!("Connecting to DB: {}", database_url);
+        let pool = PgPool::connect(&database_url).await.unwrap();
+        let rows: Vec<crate::models::CustomCard> = sqlx::query_as("SELECT * FROM custom_cards").fetch_all(&pool).await.unwrap();
+        for r in rows {
+            println!("=== CARD ===");
+            println!("name: {}", r.name);
+            println!("title: {}", r.title);
+            println!("image_url: {:?}", r.image_url);
+        }
+    }
+}
