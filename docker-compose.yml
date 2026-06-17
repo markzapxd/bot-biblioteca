@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:16-alpine
+    container_name: abc
     environment:
       POSTGRES_DB: bibliotecario
       POSTGRES_USER: bibliotecario
@@ -18,6 +19,7 @@ services:
   bot:
     build: .
     env_file: .env
+    container_name: abcd
     environment:
       ASSETS_DIR: /app/assets/images
       DATABASE_URL: postgres://bibliotecario:bibliotecario@db:5432/bibliotecario
