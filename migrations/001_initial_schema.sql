@@ -51,3 +51,11 @@ CREATE INDEX IF NOT EXISTS idx_voice_sessions_guild_duration ON voice_sessions(g
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_active ON voice_sessions(active) WHERE active = TRUE;
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname_history JSONB DEFAULT '[]'::jsonb;
+
+CREATE TABLE IF NOT EXISTS user_infractions (
+    guild_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    infraction_count INT DEFAULT 1,
+    last_infraction_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (guild_id, user_id)
+);
