@@ -59,7 +59,7 @@ pub fn require_owner(user_id: u64) -> Result<()> {
 }
 
 pub fn require_admin(user_id: u64, member: &Member, guild_config: &Guild) -> Result<()> {
-    if is_owner(user_id) || is_admin(member, guild_config) {
+    if is_owner(user_id) || is_admin(member, guild_config) || is_staff(member, guild_config) {
         return Ok(());
     }
     Err(BotError::Unauthorized("Apenas administradores".to_string()))
@@ -87,5 +87,5 @@ pub fn require_admin_or_staff(user_id: u64, member: &Member, guild_config: &Guil
 }
 
 pub fn is_immune(user_id: u64, member: &Member, guild_config: &Guild) -> bool {
-    is_owner(user_id) || is_admin(member, guild_config)
+    is_owner(user_id) || is_admin(member, guild_config) || is_staff(member, guild_config)
 }

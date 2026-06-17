@@ -91,15 +91,21 @@ impl AssetManager {
     }
 
     pub fn embed_with(&self, name: &str, embed: CreateEmbed) -> (CreateEmbed, Option<CreateAttachment>) {
-        let url = match self.get_attachment_url(name) {
+        let asset_name = if self.cache.contains_key(name) {
+            name
+        } else {
+            "default"
+        };
+
+        let url = match self.get_attachment_url(asset_name) {
             Some(u) => u,
             None => return (embed, None),
         };
-        let data = match self.cache.get(name) {
+        let data = match self.cache.get(asset_name) {
             Some(d) => d.clone(),
             None => return (embed, None),
         };
-        let filename = match self.mapping.get(name) {
+        let filename = match self.mapping.get(asset_name) {
             Some(f) => f.clone(),
             None => return (embed, None),
         };
@@ -109,15 +115,21 @@ impl AssetManager {
     }
 
     pub fn embed_with_large(&self, name: &str, embed: CreateEmbed) -> (CreateEmbed, Option<CreateAttachment>) {
-        let url = match self.get_attachment_url(name) {
+        let asset_name = if self.cache.contains_key(name) {
+            name
+        } else {
+            "default"
+        };
+
+        let url = match self.get_attachment_url(asset_name) {
             Some(u) => u,
             None => return (embed, None),
         };
-        let data = match self.cache.get(name) {
+        let data = match self.cache.get(asset_name) {
             Some(d) => d.clone(),
             None => return (embed, None),
         };
-        let filename = match self.mapping.get(name) {
+        let filename = match self.mapping.get(asset_name) {
             Some(f) => f.clone(),
             None => return (embed, None),
         };

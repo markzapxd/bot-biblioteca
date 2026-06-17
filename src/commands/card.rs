@@ -7,8 +7,7 @@ use crate::permissions;
 pub fn register(commands: &mut Vec<CreateCommand>) {
     commands.push(
         CreateCommand::new("card")
-            .description("Sistema de cards personalizados")
-            .default_member_permissions(Permissions::MANAGE_GUILD),
+            .description("Sistema de cards personalizados"),
     );
 }
 
@@ -19,7 +18,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     let guild_id_str = guild_id.to_string();
     let guild_config = _guild_cache.get(&guild_id_str)
         .ok_or_else(|| BotError::NotFound("Guild config not found".into()))?;
-    permissions::require_admin(user_id, member, &guild_config)?;
+    permissions::require_admin_or_staff(user_id, member, &guild_config)?;
 
     let cards = crate::repositories::custom_card_repo::list_by_guild(pool, &guild_id_str).await?;
     let embed = build_main_embed(&cards);
