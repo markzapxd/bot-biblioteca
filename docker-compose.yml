@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: bibliotecario
       POSTGRES_PASSWORD: bibliotecario
     ports:
-      - "5432:5432"
+      - "7654:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
       ASSETS_DIR: /app/assets/images
       DATABASE_URL: postgres://bibliotecario:bibliotecario@db:5432/bibliotecario
     ports:
-      - "3050:3050"
+      - "3059:3050"
     depends_on:
       db:
         condition: service_healthy
