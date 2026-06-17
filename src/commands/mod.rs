@@ -1,6 +1,7 @@
 pub mod addticket;
 pub mod admin;
 pub mod botstats;
+pub mod card;
 pub mod claimticket;
 pub mod clearuser;
 pub mod closeticket;
@@ -33,6 +34,7 @@ pub async fn register_all(commands: &mut Vec<CreateCommand>) {
     addticket::register(commands);
     admin::register(commands);
     botstats::register(commands);
+    card::register(commands);
     claimticket::register(commands);
     clearuser::register(commands);
     closeticket::register(commands);
@@ -75,6 +77,7 @@ pub async fn route(ctx: &Context, interaction: &CommandInteraction, state: &BotS
         "addticket" => addticket::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "admin" => admin::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "botstats" => botstats::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
+        "card" => card::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "claimticket" => claimticket::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "clearuser" | "limpar" => clearuser::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "closeticket" => closeticket::handle(ctx, interaction, &state.pool, &state.guild_cache).await,

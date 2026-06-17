@@ -1,3 +1,5 @@
+pub mod custom_card;
+
 use crate::models::{User, VoiceSession};
 use serenity::all::{Colour, CreateEmbed};
 

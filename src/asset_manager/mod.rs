@@ -35,6 +35,7 @@ static DEFAULT_ASSETS: &[(&str, &str)] = &[
     ("modules", "modules.png"),
     ("setup", "setup.png"),
     ("ticket", "ticket.png"),
+    ("card", "card.png"),
     ("admin", "admin.png"),
     ("default", "default.png"),
     ("approved", "approved.webp"),
