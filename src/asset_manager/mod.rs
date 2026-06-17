@@ -17,7 +17,7 @@ static DEFAULT_ASSETS: &[(&str, &str)] = &[
     ("voicehistory", "voicehistory.png"),
     ("userinfo", "userinfo.png"),
     ("clearuser", "clearuser.png"),
-    ("nuke", "nuke.png"),
+    ("nuke", "nuke.gif"),
     ("lockdown", "lockdown.png"),
     ("verification", "verification.gif"),
     ("lookup", "lookup.png"),

@@ -35,7 +35,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
     });
 
     let embed = CreateEmbed::new()
-        .title("Bibliotecario — Ajuda")
+        .title("Bibliotecaria — Ajuda")
         .description("Selecione uma categoria abaixo para ver os comandos disponiveis.")
         .colour(Colour::new(0x2B2D31));
     let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "help", embed).await;
@@ -49,8 +49,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
 
     let mut msg = CreateInteractionResponseMessage::new()
         .embed(embed)
-        .components(vec![CreateActionRow::Buttons(buttons)])
-        .ephemeral(true);
+        .components(vec![CreateActionRow::Buttons(buttons)]);
     if let Some(file) = attachment {
         msg = msg.add_file(file);
     }
@@ -62,9 +61,9 @@ pub async fn handle_membro(ctx: &Context, component: &ComponentInteraction) -> R
     let embed = CreateEmbed::new()
         .title("Comandos — Membros")
         .colour(Colour::new(0x2B2D31))
-        .field("Geral", "`/help` — Mostrar esta ajuda\n`/info` — Informacoes do servidor\n`/lookup` — Buscar informacoes de um usuario", false)
-        .field("Usuario", "`/userinfo` / `/ficha` — Ficha tactica do usuario\n`/names` / `/nomes` — Historico de nomes\n`/privacy` / `/privacidade` — Alternar modo privado", false)
-        .field("Voz", "`/stats` / `/ranking` — Ranking de tempo em voz\n`/lastcall` / `/ultimochamada` — Ultima sessao de voz\n`/voicehistory` / `/historicovoz` — Historico completo", false);
+        .field("Geral", "**`/help`** — Mostrar esta ajuda\n**`/info`** — Informacoes do servidor\n**`/lookup`** — Buscar informacoes de um usuario", false)
+        .field("Usuario", "**`/userinfo`** / **`/ficha`** — Ficha tactica do usuario\n**`/names`** / **`/nomes`** — Historico de nomes\n**`/privacy`** / **`/privacidade`** — Alternar modo privado", false)
+        .field("Voz", "**`/stats`** / **`/ranking`** — Ranking de tempo em voz\n**`/lastcall`** / **`/ultimochamada`** — Ultima sessao de voz\n**`/voicehistory`** / **`/historicovoz`** — Historico completo", false);
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "help", embed).await;
 
     let mut msg = CreateInteractionResponseMessage::new()
@@ -86,20 +85,20 @@ pub async fn handle_admin(ctx: &Context, component: &ComponentInteraction) -> Re
 async fn build_admin_p1() -> CreateEmbed {
     let desc = format!(
         "**── Moderacao ──**\n\
-         `/admin ban` — Banir usuario\n\
-         `/admin kick` — Expulsar usuario\n\
-         `/admin mute` — Silenciar usuario\n\
-         `/admin unmute` — Remover silencio\n\
-         `/admin warn` — Advertir usuario\n\
+         **`/admin ban`** — Banir usuario\n\
+         **`/admin kick`** — Expulsar usuario\n\
+         **`/admin mute`** — Silenciar usuario\n\
+         **`/admin unmute`** — Remover silencio\n\
+         **`/admin warn`** — Advertir usuario\n\
          \n\
          **── Mensagens ──**\n\
-         `/clearuser` / `/limpar` — Limpar mensagens\n\
-         `/nuke` — Clonar e recriar o canal\n\
+         **`/clearuser`** / **`/limpar`** — Limpar mensagens\n\
+         **`/nuke`** — Clonar e recriar o canal\n\
          \n\
          **── Seguranca ──**\n\
-         `/verify` — Exibir painel de verificacao\n\
-         `/raidmode` / `/modoraid` — Ativar/desativar modo raid\n\
-         `/lockdown` — Atribuir cargo a todos membros"
+         **`/verify`** — Exibir painel de verificacao\n\
+         **`/raidmode`** / **`/modoraid`** — Ativar/desativar modo raid\n\
+         **`/lockdown`** — Atribuir cargo a todos membros"
     );
     CreateEmbed::new()
         .title("Comandos — Admin (1/2)")
@@ -110,21 +109,21 @@ async fn build_admin_p1() -> CreateEmbed {
 async fn build_admin_p2() -> CreateEmbed {
     let desc = format!(
         "**── Modulos & Setup ──**\n\
-         `/setup` / `/configurar` — Configurar sistemas\n\
-         `/modulos` — Gerenciar modulos ativos\n\
-         `/sync` — Re-registrar comandos\n\
+         **`/setup`** / **`/configurar`** — Configurar sistemas\n\
+         **`/modulos`** — Gerenciar modulos ativos\n\
+         **`/sync`** — Re-registrar comandos\n\
          \n\
          **── Tickets ──**\n\
-         `/ticketpanel` — Postar painel de tickets\n\
-         `/addticket` — Adicionar usuario ao ticket\n\
-         `/removeticket` — Remover usuario do ticket\n\
-         `/closeticket` — Fechar ticket\n\
-         `/claimticket` — Assumir ticket\n\
+         **`/ticketpanel`** — Postar painel de tickets\n\
+         **`/addticket`** — Adicionar usuario ao ticket\n\
+         **`/removeticket`** — Remover usuario do ticket\n\
+         **`/closeticket`** — Fechar ticket\n\
+         **`/claimticket`** — Assumir ticket\n\
          \n\
          **── Bot ──**\n\
-         `/botstats` — Estatisticas do bot\n\
-         `/shutdown` — Desligar o bot\n\
-         `!reloadslash` — Recarregar comandos"
+         **`/botstats`** — Estatisticas do bot\n\
+         **`/shutdown`** — Desligar o bot\n\
+         **`!reloadslash`** — Recarregar comandos"
     );
     CreateEmbed::new()
         .title("Comandos — Admin (2/2)")
@@ -217,7 +216,7 @@ pub async fn handle_back(ctx: &Context, component: &ComponentInteraction) -> Res
     });
 
     let embed = CreateEmbed::new()
-        .title("Bibliotecario — Ajuda")
+        .title("Bibliotecaria — Ajuda")
         .description("Selecione uma categoria abaixo para ver os comandos disponiveis.")
         .colour(Colour::new(0x2B2D31));
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "help", embed).await;

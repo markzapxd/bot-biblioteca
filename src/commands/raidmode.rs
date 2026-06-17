@@ -38,6 +38,12 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
 
 pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool: &PgPool) -> Result<()> {
     let guild_id = component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+
+    // Defer response immediately to avoid 3-second timeout
+    component.create_response(&ctx, CreateInteractionResponse::Defer(
+        CreateInteractionResponseMessage::new().ephemeral(true)
+    )).await?;
+
     let is_active = anti_raid::is_raid_active(guild_id.get());
 
     if is_active {
@@ -52,11 +58,11 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "raidmode", embed).await;
     let row = build_raidmode_row(new_status);
 
-    let mut msg = CreateInteractionResponseMessage::new().embed(embed).components(vec![row]);
+    let mut msg = EditInteractionResponse::new().embed(embed).components(vec![row]);
     if let Some(file) = attachment {
-        msg = msg.add_file(file);
+        msg = msg.new_attachment(file);
     }
-    component.create_response(&ctx, CreateInteractionResponse::UpdateMessage(msg)).await?;
+    component.edit_response(&ctx, msg).await?;
     Ok(())
 }
 

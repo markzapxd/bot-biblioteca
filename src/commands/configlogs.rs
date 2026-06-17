@@ -98,8 +98,28 @@ pub async fn handle_create_channel(ctx: &Context, component: &ComponentInteracti
 
     let everyone_role_id = guild_id.everyone_role();
 
-    
-    let mut channel = guild_id.create_channel(&ctx, CreateChannel::new("logs").kind(ChannelType::Text)).await?;
+    let channels = guild_id.channels(&ctx.http).await.unwrap_or_default();
+    let mut existing_channel = None;
+
+    if let Some(log_channel_id_str) = &config.log_channel_id {
+        if let Ok(id) = log_channel_id_str.parse::<u64>() {
+            let ch_id = ChannelId::new(id);
+            if let Some(ch) = channels.get(&ch_id) {
+                existing_channel = Some(ch.clone());
+            }
+        }
+    }
+
+    if existing_channel.is_none() {
+        if let Some(ch) = channels.values().find(|ch| ch.name == "logs" && ch.kind == ChannelType::Text) {
+            existing_channel = Some(ch.clone());
+        }
+    }
+
+    let mut channel = match existing_channel {
+        Some(ch) => ch,
+        None => guild_id.create_channel(&ctx, CreateChannel::new("logs").kind(ChannelType::Text)).await?,
+    };
 
     let mut overwrites = Vec::new();
 
@@ -157,13 +177,13 @@ fn build_logs_embed(config: &crate::models::Guild, modules: &crate::models::guil
     let mut desc = String::new();
 
     if let Some(log_channel_id) = &config.log_channel_id {
-        desc.push_str(&format!("📍 **Canal de Logs**: <#{}>\n\n", log_channel_id));
+        desc.push_str(&format!("**Canal de Logs**: <#{}>\n\n", log_channel_id));
         desc.push_str("Selecione uma opção no menu abaixo para ativar ou desativar uma função de log específica.\n\n");
 
-        let status_calls = if modules.log_calls { "Ativo" } else { "Desativado" };
-        let status_joins = if modules.log_joins_leaves { "Ativo" } else { "Desativado" };
-        let status_roles = if modules.log_roles { "Ativo" } else { "Desativado" };
-        let status_messages = if modules.log_messages { "Ativo" } else { "Desativado" };
+        let status_calls = if modules.log_calls { "**Ativo**" } else { "Desativado" };
+        let status_joins = if modules.log_joins_leaves { "**Ativo**" } else { "Desativado" };
+        let status_roles = if modules.log_roles { "**Ativo**" } else { "Desativado" };
+        let status_messages = if modules.log_messages { "**Ativo**" } else { "Desativado" };
 
         desc.push_str(&format!("Logs de Call: {}\n", status_calls));
         desc.push_str(&format!("Logs de Entradas/Saídas: {}\n", status_joins));

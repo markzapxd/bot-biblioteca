@@ -82,7 +82,7 @@ pub fn bare_coloured(title: &str, description: &str, colour: Colour) -> CreateEm
 }
 
 fn footer() -> CreateEmbedFooter {
-    CreateEmbedFooter::new("Bibliotecario")
+    CreateEmbedFooter::new("Bibliotecaria")
 }
 
 pub fn timestamp() -> Timestamp {

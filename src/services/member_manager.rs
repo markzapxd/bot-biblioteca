@@ -83,9 +83,9 @@ pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInt
     let embed = CreateEmbed::new()
         .title("Solicitação de Acesso")
         .description(format!("<@{}> solicitou acesso ao servidor.", user_id))
-        .field("Quem chamou", &referral_text, false)
-        .field("ID do usuário", &user_id.to_string(), true)
-        .thumbnail(avatar_url)
+        .field("Quem chamou", format!("**`{}`**", referral_text), false)
+        .field("ID do usuário", format!("`{}`", user_id), true)
+        .image(avatar_url)
         .colour(Colour::new(0x2B2D31));
 
     let approve_btn = CreateButton::new(format!("approve_{}", user_id))
@@ -192,11 +192,6 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
             let mut pending = PENDING_REQUESTS.lock().await;
             pending.remove(&target_user_id);
         }
-
-        let _ = interaction_clone.create_followup(&ctx_clone.http, CreateInteractionResponseFollowup::new()
-            .content(if approved { "Acesso aprovado com sucesso." } else { "Acesso rejeitado." })
-            .ephemeral(true)
-        ).await;
     });
 
     Ok(())

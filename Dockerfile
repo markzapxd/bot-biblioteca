@@ -8,8 +8,8 @@ RUN cargo build
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/debug/bibliotecario /usr/local/bin/bibliotecario
+COPY --from=builder /app/target/debug/bibliotecaria /usr/local/bin/bibliotecaria
 COPY assets/ /app/assets/
 ENV ASSETS_DIR=/app/assets/images
 EXPOSE 3050
-CMD ["bibliotecario"]
+CMD ["bibliotecaria"]
