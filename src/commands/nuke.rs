@@ -14,9 +14,12 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
 }
 
 pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
+    let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let member = interaction.member.as_ref().ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let user_id = interaction.user.id.get();
-    permissions::require_admin(user_id, member)?;
+    let guild_config = _guild_cache.get(&guild_id.to_string())
+        .ok_or_else(|| crate::errors::BotError::NotFound("Guild config not found".into()))?;
+    permissions::require_admin(user_id, member, &guild_config)?;
 
     let channel_id = interaction.channel_id;
 
@@ -52,7 +55,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
 
         let _ = channel_id.delete(ctx).await;
 
-        let embed = theme::success("Canal Recriado", &format!("Canal #{} foi nuka btw", name));
+        let embed = theme::success("Canal Recriado", &format!("Canal #{} foi nukado btw", name));
         let (embed, attachment) = crate::asset_manager::prepare_embed_large(ctx, "nuke", embed).await;
         let mut msg = CreateMessage::new().embed(embed);
         if let Some(file) = attachment {

@@ -10,6 +10,7 @@ pub struct User {
     pub premium: Option<bool>,
     pub username_history: serde_json::Value,
     pub avatar_history: serde_json::Value,
+    pub nickname_history: serde_json::Value,
     pub last_seen: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -27,6 +28,12 @@ pub struct AvatarEntry {
     pub date: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NicknameEntry {
+    pub name: String,
+    pub date: DateTime<Utc>,
+}
+
 impl User {
     pub fn get_username_history(&self) -> Vec<UsernameEntry> {
         serde_json::from_value(self.username_history.clone()).unwrap_or_default()
@@ -34,6 +41,10 @@ impl User {
 
     pub fn get_avatar_history(&self) -> Vec<AvatarEntry> {
         serde_json::from_value(self.avatar_history.clone()).unwrap_or_default()
+    }
+
+    pub fn get_nickname_history(&self) -> Vec<NicknameEntry> {
+        serde_json::from_value(self.nickname_history.clone()).unwrap_or_default()
     }
 
     pub fn is_private_mode(&self) -> bool {

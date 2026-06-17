@@ -19,7 +19,7 @@ static DEFAULT_ASSETS: &[(&str, &str)] = &[
     ("clearuser", "clearuser.png"),
     ("nuke", "nuke.png"),
     ("lockdown", "lockdown.png"),
-    ("verification", "verification.png"),
+    ("verification", "verification.gif"),
     ("lookup", "lookup.png"),
     ("warnings", "warnings.png"),
     ("ticketpanel", "ticketpanel.png"),
@@ -37,6 +37,8 @@ static DEFAULT_ASSETS: &[(&str, &str)] = &[
     ("ticket", "ticket.png"),
     ("admin", "admin.png"),
     ("default", "default.png"),
+    ("approved", "approved.png"),
+    ("rejected", "rejected.png"),
 ];
 
 #[derive(Debug, Clone)]
@@ -87,10 +89,6 @@ impl AssetManager {
         self.cache.contains_key(name)
     }
 
-    /// Build an embed with a thumbnail attachment.
-    ///
-    /// Returns `(embed_with_thumbnail, Some(CreateAttachment))` if the asset is cached,
-    /// or `(embed_unchanged, None)` if not.
     pub fn embed_with(&self, name: &str, embed: CreateEmbed) -> (CreateEmbed, Option<CreateAttachment>) {
         let url = match self.get_attachment_url(name) {
             Some(u) => u,
@@ -109,7 +107,6 @@ impl AssetManager {
         (embed, Some(attachment))
     }
 
-    /// Build an embed with a large image attachment.
     pub fn embed_with_large(&self, name: &str, embed: CreateEmbed) -> (CreateEmbed, Option<CreateAttachment>) {
         let url = match self.get_attachment_url(name) {
             Some(u) => u,

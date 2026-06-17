@@ -19,7 +19,7 @@ pub async fn send_ticket_panel(ctx: &Context, channel_id: ChannelId) -> Result<(
 
     let button = CreateButton::new("ticket_open")
         .label("REQUISITAR SUPORTE")
-        .style(ButtonStyle::Primary);
+        .style(ButtonStyle::Secondary);
     let row = CreateActionRow::Buttons(vec![button]);
 
     let mut msg = CreateMessage::new().embed(embed).components(vec![row]);
@@ -82,6 +82,16 @@ pub async fn handle_ticket_open(ctx: &Context, interaction: &ComponentInteractio
         }
     }
 
+    if let Some(admin_role_id) = &guild_config.admin_role_id {
+        if let Ok(role_id_num) = admin_role_id.parse::<u64>() {
+            overwrites.push(PermissionOverwrite {
+                kind: PermissionOverwriteType::Role(RoleId::new(role_id_num)),
+                allow: Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::MANAGE_MESSAGES,
+                deny: Permissions::empty(),
+            });
+        }
+    }
+
     let builder = CreateChannel::new(&channel_name)
         .kind(ChannelType::Text)
         .permissions(overwrites);
@@ -101,7 +111,7 @@ pub async fn handle_ticket_open(ctx: &Context, interaction: &ComponentInteractio
 
     let close_btn = CreateButton::new("ticket_close")
         .label("Fechar Ticket")
-        .style(ButtonStyle::Danger);
+        .style(ButtonStyle::Secondary);
     let row = CreateActionRow::Buttons(vec![close_btn]);
 
     let mut msg = CreateMessage::new().embed(embed).components(vec![row]);
@@ -128,7 +138,7 @@ pub async fn handle_ticket_close_request(ctx: &Context, interaction: &ComponentI
 
     let confirm_btn = CreateButton::new("ticket_close_confirm")
         .label("Sim, Fechar")
-        .style(ButtonStyle::Danger);
+        .style(ButtonStyle::Secondary);
     let cancel_btn = CreateButton::new("ticket_close_cancel")
         .label("Cancelar")
         .style(ButtonStyle::Secondary);

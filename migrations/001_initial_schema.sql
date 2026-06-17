@@ -49,3 +49,5 @@ CREATE TABLE IF NOT EXISTS voice_sessions (
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_user_joined ON voice_sessions(user_id, joined_at);
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_guild_duration ON voice_sessions(guild_id, duration);
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_active ON voice_sessions(active) WHERE active = TRUE;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname_history JSONB DEFAULT '[]'::jsonb;

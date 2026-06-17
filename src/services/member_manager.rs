@@ -39,60 +39,61 @@ pub async fn handle_access_request(ctx: &Context, interaction: &ComponentInterac
         }
     }
 
-    let menu = CreateSelectMenu::new("referral_select", CreateSelectMenuKind::User { default_users: None });
-    let row = CreateActionRow::SelectMenu(menu);
+    let input = CreateInputText::new(InputTextStyle::Short, "Quem te chamou para o servidor?", "referral_input")
+        .placeholder("Digite o nome ou apelido da pessoa")
+        .max_length(100);
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new()
-            .content("Selecione um membro da staff para referenciá-lo:")
-            .components(vec![row])
-            .ephemeral(true)
-    )).await?;
+    let modal = CreateModal::new("referral_modal", "Verificação de Acesso")
+        .components(vec![CreateActionRow::InputText(input)]);
 
-    {
-        let mut pending = PENDING_REQUESTS.lock().await;
-        pending.insert(user_id);
-    }
+    interaction.create_response(&ctx.http, CreateInteractionResponse::Modal(modal)).await?;
 
     Ok(())
 }
 
-pub async fn handle_referral_selection(ctx: &Context, interaction: &ComponentInteraction, guild_config: &Guild) -> Result<()> {
-    let selected_user_id = interaction.data.resolved.users.keys().next()
-        .map(|uid| uid.get())
-        .unwrap_or(0);
+pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInteraction, guild_config: &Guild) -> Result<()> {
+    let user_id = modal_submit.user.id.get();
 
-    let is_staff_member = if let Some(guild_id) = interaction.guild_id {
-        if let Ok(member) = guild_id.member(&ctx.http, selected_user_id).await {
-            crate::permissions::is_staff(&member, guild_config)
-        } else {
-            false
+    {
+        let mut pending = PENDING_REQUESTS.lock().await;
+        if pending.contains(&user_id) {
+            modal_submit.create_response(&ctx.http, CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                    .content("Você já possui uma solicitação de acesso pendente.")
+                    .ephemeral(true)
+            )).await?;
+            return Ok(());
         }
-    } else {
-        false
-    };
-
-    if !is_staff_member {
-        interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-            CreateInteractionResponseMessage::new()
-                .content("O usuário selecionado não é um membro da staff.")
-                .ephemeral(true)
-        )).await?;
-        return Ok(());
+        pending.insert(user_id);
     }
 
-    let requester_id = interaction.user.id.get();
+    let referral_text = modal_submit.data.components.first()
+        .and_then(|row| row.components.first())
+        .and_then(|comp| {
+            if let ActionRowComponent::InputText(input) = comp {
+                input.value.clone()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "Não informado".to_string());
+
+    let avatar_url = modal_submit.user.face();
+
     let embed = CreateEmbed::new()
         .title("Solicitação de Acesso")
-        .description(format!("<@{}> solicitou acesso ao servidor.\nReferenciado por: <@{}>", requester_id, selected_user_id))
+        .description(format!("<@{}> solicitou acesso ao servidor.", user_id))
+        .field("Quem chamou", &referral_text, false)
+        .field("ID do usuário", &user_id.to_string(), true)
+        .thumbnail(avatar_url)
         .colour(Colour::new(0x2B2D31));
 
-    let approve_btn = CreateButton::new(format!("approve_{}", requester_id))
+    let approve_btn = CreateButton::new(format!("approve_{}", user_id))
         .label("Aprovar")
-        .style(ButtonStyle::Success);
-    let reject_btn = CreateButton::new(format!("reject_{}", requester_id))
+        .style(ButtonStyle::Secondary);
+    let reject_btn = CreateButton::new(format!("reject_{}", user_id))
         .label("Rejeitar")
-        .style(ButtonStyle::Danger);
+        .style(ButtonStyle::Secondary);
     let row = CreateActionRow::Buttons(vec![approve_btn, reject_btn]);
 
     if let Some(staff_channel_id) = &guild_config.staff_channel_id {
@@ -101,7 +102,7 @@ pub async fn handle_referral_selection(ctx: &Context, interaction: &ComponentInt
         }
     }
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
+    modal_submit.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
             .content("Sua solicitação foi enviada para aprovação da staff.")
             .ephemeral(true)
@@ -117,7 +118,7 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
         .unwrap_or(0);
 
     if let Some(member) = &interaction.member {
-        if !crate::permissions::is_admin(member) && !crate::permissions::is_staff(member, guild_config) {
+        if !crate::permissions::is_admin(member, guild_config) && !crate::permissions::is_staff(member, guild_config) {
             interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
                     .content("Você não tem permissão para realizar esta ação.")
@@ -126,6 +127,10 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
             return Ok(());
         }
     }
+
+    interaction.create_response(&ctx.http, CreateInteractionResponse::Defer(
+        CreateInteractionResponseMessage::new().ephemeral(true)
+    )).await?;
 
     if let Some(guild_id) = interaction.guild_id {
         if let Ok(member) = guild_id.member(&ctx.http, target_user_id).await {
@@ -142,13 +147,23 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
                     .title("Acesso Aprovado")
                     .description("Sua solicitação de acesso ao servidor foi aprovada!")
                     .colour(Colour::new(0x2B2D31));
-                let _ = member.user.direct_message(&ctx.http, CreateMessage::new().embed(dm_embed)).await;
+                let (dm_embed, attachment) = crate::asset_manager::prepare_embed_large(ctx, "approved", dm_embed).await;
+                let mut msg = CreateMessage::new().embed(dm_embed);
+                if let Some(file) = attachment {
+                    msg = msg.add_file(file);
+                }
+                let _ = member.user.direct_message(&ctx.http, msg).await;
             } else {
                 let dm_embed = CreateEmbed::new()
                     .title("Acesso Rejeitado")
                     .description("Sua solicitação de acesso ao servidor foi rejeitada.")
                     .colour(Colour::new(0x2B2D31));
-                let _ = member.user.direct_message(&ctx.http, CreateMessage::new().embed(dm_embed)).await;
+                let (dm_embed, attachment) = crate::asset_manager::prepare_embed_large(ctx, "rejected", dm_embed).await;
+                let mut msg = CreateMessage::new().embed(dm_embed);
+                if let Some(file) = attachment {
+                    msg = msg.add_file(file);
+                }
+                let _ = member.user.direct_message(&ctx.http, msg).await;
             }
         }
     }
@@ -158,18 +173,25 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
         pending.remove(&target_user_id);
     }
 
-    let updated_embed = CreateEmbed::new()
+    let thumbnail_url = interaction.message.embeds.first()
+        .and_then(|e| e.thumbnail.as_ref())
+        .map(|t| t.url.clone());
+
+    let mut updated_embed = CreateEmbed::new()
         .title("Solicitação de Acesso")
-        .description(format!("<@{}> - {}", target_user_id, if approved { "Aprovado" } else { "Rejeitado" }))
+        .description(format!("<@{}> — {}", target_user_id, if approved { "Aprovado" } else { "Rejeitado" }))
         .colour(Colour::new(0x2B2D31));
 
-    interaction.message.clone().edit(&ctx.http, EditMessage::new().embed(updated_embed).components(vec![])).await?;
+    if let Some(url) = thumbnail_url {
+        updated_embed = updated_embed.thumbnail(url);
+    }
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new()
-            .content(if approved { "Acesso aprovado com sucesso." } else { "Acesso rejeitado." })
-            .ephemeral(true)
-    )).await?;
+    interaction.edit_response(&ctx.http, EditInteractionResponse::new().embed(updated_embed).components(vec![])).await?;
+
+    interaction.create_followup(&ctx.http, CreateInteractionResponseFollowup::new()
+        .content(if approved { "Acesso aprovado com sucesso." } else { "Acesso rejeitado." })
+        .ephemeral(true)
+    ).await?;
 
     Ok(())
 }

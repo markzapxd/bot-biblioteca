@@ -4,7 +4,7 @@ use tracing::error;
 
 use crate::errors::Result;
 
-pub async fn send_log(ctx: &Context, guild_id: u64, embed: CreateEmbed, pool: &PgPool) -> Result<()> {
+pub async fn send_log(ctx: &Context, guild_id: u64, embed: CreateEmbed, module: &str, pool: &PgPool) -> Result<()> {
     let guild = match crate::repositories::guild_repo::find_by_id(pool, &guild_id.to_string()).await {
         Ok(Some(g)) => g,
         Ok(None) => return Ok(()),
@@ -15,6 +15,10 @@ pub async fn send_log(ctx: &Context, guild_id: u64, embed: CreateEmbed, pool: &P
     };
 
     if !guild.is_module_enabled("logs") {
+        return Ok(());
+    }
+
+    if !guild.is_module_enabled(module) {
         return Ok(());
     }
 
@@ -31,7 +35,7 @@ pub async fn send_log(ctx: &Context, guild_id: u64, embed: CreateEmbed, pool: &P
 
 pub async fn log_message_edit(ctx: &Context, old: &str, new: &str, author: &User, guild_id: u64, pool: &PgPool) -> Result<()> {
     let embed = crate::embeds::message_edit(old, new, author);
-    send_log(ctx, guild_id, embed, pool).await
+    send_log(ctx, guild_id, embed, "log_messages", pool).await
 }
 
 pub async fn log_message_delete(ctx: &Context, content: &str, author_name: &str, channel_name: &str, guild_id: u64, pool: &PgPool) -> Result<()> {
@@ -41,17 +45,17 @@ pub async fn log_message_delete(ctx: &Context, content: &str, author_name: &str,
         .field("Channel", channel_name, true)
         .field("Content", content, false)
         .colour(Colour::new(0x2B2D31));
-    send_log(ctx, guild_id, embed, pool).await
+    send_log(ctx, guild_id, embed, "log_messages", pool).await
 }
 
 pub async fn log_member_add(ctx: &Context, member: &Member, guild_id: u64, pool: &PgPool) -> Result<()> {
     let embed = crate::embeds::member_join(member);
-    send_log(ctx, guild_id, embed, pool).await
+    send_log(ctx, guild_id, embed, "log_joins_leaves", pool).await
 }
 
 pub async fn log_member_remove(ctx: &Context, member: &Member, guild_id: u64, pool: &PgPool) -> Result<()> {
     let embed = crate::embeds::member_leave(member);
-    send_log(ctx, guild_id, embed, pool).await
+    send_log(ctx, guild_id, embed, "log_joins_leaves", pool).await
 }
 
 pub async fn log_member_update(ctx: &Context, old_roles: &[RoleId], new_roles: &[RoleId], member: &Member, guild_id: u64, pool: &PgPool) -> Result<()> {
@@ -77,7 +81,7 @@ pub async fn log_member_update(ctx: &Context, old_roles: &[RoleId], new_roles: &
         .thumbnail(member.user.face())
         .description(description)
         .colour(Colour::new(0x2B2D31));
-    send_log(ctx, guild_id, embed, pool).await
+    send_log(ctx, guild_id, embed, "log_roles", pool).await
 }
 
 pub async fn log_voice_join(ctx: &Context, user_name: &str, avatar_url: &str, channel_name: &str, guild_id: u64, pool: &PgPool) -> Result<()> {
@@ -87,7 +91,7 @@ pub async fn log_voice_join(ctx: &Context, user_name: &str, avatar_url: &str, ch
         .field("User", user_name, true)
         .field("Channel", channel_name, true)
         .colour(Colour::new(0x2B2D31));
-    send_log(ctx, guild_id, embed, pool).await
+    send_log(ctx, guild_id, embed, "log_calls", pool).await
 }
 
 pub async fn log_voice_leave(ctx: &Context, user_name: &str, avatar_url: &str, channel_name: &str, duration: i64, guild_id: u64, pool: &PgPool) -> Result<()> {
@@ -98,5 +102,5 @@ pub async fn log_voice_leave(ctx: &Context, user_name: &str, avatar_url: &str, c
         .field("Channel", channel_name, true)
         .field("Duration", crate::utils::time::format_duration(duration), true)
         .colour(Colour::new(0x2B2D31));
-    send_log(ctx, guild_id, embed, pool).await
+    send_log(ctx, guild_id, embed, "log_calls", pool).await
 }

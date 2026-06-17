@@ -19,7 +19,9 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
     let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let member = interaction.member.as_ref().ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let user_id = interaction.user.id.get();
-    permissions::require_admin(user_id, member)?;
+    let guild_config = _guild_cache.get(&guild_id.to_string())
+        .ok_or_else(|| crate::errors::BotError::NotFound("Guild config not found".into()))?;
+    permissions::require_admin(user_id, member, &guild_config)?;
 
     let is_active = anti_raid::is_raid_active(guild_id.get());
     let embed = build_raidmode_embed(is_active);
@@ -66,7 +68,7 @@ fn build_raidmode_embed(is_active: bool) -> CreateEmbed {
 fn build_raidmode_row(is_active: bool) -> CreateActionRow {
     let btn = CreateButton::new("raidmode_toggle")
         .label(if is_active { "Desativar" } else { "Ativar" })
-        .style(if is_active { ButtonStyle::Success } else { ButtonStyle::Danger });
+        .style(ButtonStyle::Secondary);
     CreateActionRow::Buttons(vec![btn])
 }
 

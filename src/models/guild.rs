@@ -31,10 +31,18 @@ pub struct GuildModules {
     pub logs: bool,
     #[serde(default = "default_true")]
     pub tickets: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub voice_tracking: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub member_verification: bool,
+    #[serde(default = "default_true")]
+    pub log_calls: bool,
+    #[serde(default = "default_true")]
+    pub log_joins_leaves: bool,
+    #[serde(default = "default_true")]
+    pub log_roles: bool,
+    #[serde(default = "default_true")]
+    pub log_messages: bool,
 }
 
 fn default_true() -> bool {
@@ -49,6 +57,10 @@ impl Default for GuildModules {
             tickets: true,
             voice_tracking: false,
             member_verification: false,
+            log_calls: true,
+            log_joins_leaves: true,
+            log_roles: true,
+            log_messages: true,
         }
     }
 }
@@ -66,6 +78,10 @@ impl Guild {
             "tickets" => modules.tickets,
             "voice_tracking" => modules.voice_tracking,
             "member_verification" => modules.member_verification,
+            "log_calls" => modules.log_calls,
+            "log_joins_leaves" => modules.log_joins_leaves,
+            "log_roles" => modules.log_roles,
+            "log_messages" => modules.log_messages,
             _ => false,
         }
     }

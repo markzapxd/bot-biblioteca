@@ -66,9 +66,22 @@ pub async fn update_avatar_history(
     Ok(())
 }
 
+pub async fn update_nickname_history(
+    pool: &PgPool,
+    user_id: &str,
+    history: serde_json::Value,
+) -> Result<()> {
+    sqlx::query("UPDATE users SET nickname_history = $2, updated_at = NOW() WHERE user_id = $1")
+        .bind(user_id)
+        .bind(history)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn reset_user(pool: &PgPool, user_id: &str) -> Result<()> {
     sqlx::query(
-        "UPDATE users SET is_private = FALSE, total_voice_time = 0, premium = FALSE, username_history = '[]'::jsonb, avatar_history = '[]'::jsonb, last_seen = NULL, updated_at = NOW() WHERE user_id = $1"
+        "UPDATE users SET is_private = FALSE, total_voice_time = 0, premium = FALSE, username_history = '[]'::jsonb, avatar_history = '[]'::jsonb, nickname_history = '[]'::jsonb, last_seen = NULL, updated_at = NOW() WHERE user_id = $1"
     )
         .bind(user_id)
         .execute(pool)

@@ -10,8 +10,28 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
 
 pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
     let user_id = interaction.user.id.get();
+    let guild_id_str = interaction.guild_id.map(|g| g.to_string()).unwrap_or_default();
+    let guild_config = _guild_cache.get(&guild_id_str).unwrap_or_else(|| crate::models::Guild {
+        guild_id: guild_id_str.clone(),
+        prefix: None,
+        member_role_id: None,
+        staff_channel_id: None,
+        welcome_channel_id: None,
+        log_channel_id: None,
+        admin_role_id: None,
+        staff_role_id: None,
+        ticket_category_id: None,
+        frin_monitor_channel_id: None,
+        modules: serde_json::json!({}),
+        webhook_url: None,
+        premium: None,
+        track_mute: None,
+        track_deaf: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    });
     let is_admin = interaction.member.as_ref().map_or(false, |m| {
-        permissions::is_owner(user_id) || permissions::is_admin(m)
+        permissions::is_owner(user_id) || permissions::is_admin(m, &guild_config)
     });
 
     let embed = CreateEmbed::new()
@@ -21,10 +41,10 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
     let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "help", embed).await;
 
     let mut buttons = vec![
-        CreateButton::new("help_membro").label("Comandos de Membro").style(ButtonStyle::Primary),
+        CreateButton::new("help_membro").label("Comandos de Membro").style(ButtonStyle::Secondary),
     ];
     if is_admin {
-        buttons.push(CreateButton::new("help_admin").label("Comandos de Admin").style(ButtonStyle::Danger));
+        buttons.push(CreateButton::new("help_admin").label("Comandos de Admin").style(ButtonStyle::Secondary));
     }
 
     let mut msg = CreateInteractionResponseMessage::new()
@@ -115,14 +135,19 @@ async fn build_admin_p2() -> CreateEmbed {
 pub async fn handle_admin_p1(ctx: &Context, component: &ComponentInteraction) -> Result<()> {
     let member = component.member.as_ref().ok_or(BotError::Validation("Guild only".into()))?;
     let user_id = component.user.id.get();
-    permissions::require_admin(user_id, member)?;
+    let guild_id = component.guild_id.ok_or(BotError::Validation("Guild only".into()))?;
+    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned()
+        .ok_or_else(|| BotError::Internal("No bot state".into()))?;
+    let guild_config = state.guild_cache.get(&guild_id.to_string())
+        .ok_or_else(|| BotError::NotFound("Guild config not found".into()))?;
+    permissions::require_admin(user_id, member, &guild_config)?;
 
     let embed = build_admin_p1().await;
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "help", embed).await;
 
     let buttons = vec![
         CreateButton::new("help_admin_p2").label("Proximo →").style(ButtonStyle::Secondary),
-        CreateButton::new("help_back").label("Voltar").style(ButtonStyle::Danger),
+        CreateButton::new("help_back").label("Voltar").style(ButtonStyle::Secondary),
     ];
 
     let mut msg = CreateInteractionResponseMessage::new()
@@ -138,14 +163,19 @@ pub async fn handle_admin_p1(ctx: &Context, component: &ComponentInteraction) ->
 pub async fn handle_admin_p2(ctx: &Context, component: &ComponentInteraction) -> Result<()> {
     let member = component.member.as_ref().ok_or(BotError::Validation("Guild only".into()))?;
     let user_id = component.user.id.get();
-    permissions::require_admin(user_id, member)?;
+    let guild_id = component.guild_id.ok_or(BotError::Validation("Guild only".into()))?;
+    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned()
+        .ok_or_else(|| BotError::Internal("No bot state".into()))?;
+    let guild_config = state.guild_cache.get(&guild_id.to_string())
+        .ok_or_else(|| BotError::NotFound("Guild config not found".into()))?;
+    permissions::require_admin(user_id, member, &guild_config)?;
 
     let embed = build_admin_p2().await;
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "help", embed).await;
 
     let buttons = vec![
         CreateButton::new("help_admin_p1").label("← Anterior").style(ButtonStyle::Secondary),
-        CreateButton::new("help_back").label("Voltar").style(ButtonStyle::Danger),
+        CreateButton::new("help_back").label("Voltar").style(ButtonStyle::Secondary),
     ];
 
     let mut msg = CreateInteractionResponseMessage::new()
@@ -160,8 +190,30 @@ pub async fn handle_admin_p2(ctx: &Context, component: &ComponentInteraction) ->
 
 pub async fn handle_back(ctx: &Context, component: &ComponentInteraction) -> Result<()> {
     let user_id = component.user.id.get();
+    let guild_id_str = component.guild_id.map(|g| g.to_string()).unwrap_or_default();
+    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned()
+        .ok_or_else(|| BotError::Internal("No bot state".into()))?;
+    let guild_config = state.guild_cache.get(&guild_id_str).unwrap_or_else(|| crate::models::Guild {
+        guild_id: guild_id_str.clone(),
+        prefix: None,
+        member_role_id: None,
+        staff_channel_id: None,
+        welcome_channel_id: None,
+        log_channel_id: None,
+        admin_role_id: None,
+        staff_role_id: None,
+        ticket_category_id: None,
+        frin_monitor_channel_id: None,
+        modules: serde_json::json!({}),
+        webhook_url: None,
+        premium: None,
+        track_mute: None,
+        track_deaf: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    });
     let is_admin = component.member.as_ref().map_or(false, |m| {
-        permissions::is_owner(user_id) || permissions::is_admin(m)
+        permissions::is_owner(user_id) || permissions::is_admin(m, &guild_config)
     });
 
     let embed = CreateEmbed::new()
@@ -171,10 +223,10 @@ pub async fn handle_back(ctx: &Context, component: &ComponentInteraction) -> Res
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "help", embed).await;
 
     let mut buttons = vec![
-        CreateButton::new("help_membro").label("Comandos de Membro").style(ButtonStyle::Primary),
+        CreateButton::new("help_membro").label("Comandos de Membro").style(ButtonStyle::Secondary),
     ];
     if is_admin {
-        buttons.push(CreateButton::new("help_admin").label("Comandos de Admin").style(ButtonStyle::Danger));
+        buttons.push(CreateButton::new("help_admin").label("Comandos de Admin").style(ButtonStyle::Secondary));
     }
 
     let mut msg = CreateInteractionResponseMessage::new()

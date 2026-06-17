@@ -73,6 +73,12 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 _ if custom_id.starts_with("modules_toggle_") => {
                     crate::commands::modulos::handle_toggle(&ctx, &component, &state.pool, &state.guild_cache).await
                 }
+                _ if custom_id == "logs_select_menu" => {
+                    crate::commands::configlogs::handle_toggle(&ctx, &component, &state.pool, &state.guild_cache).await
+                }
+                _ if custom_id == "logs_create_channel" => {
+                    crate::commands::configlogs::handle_create_channel(&ctx, &component, &state.pool, &state.guild_cache).await
+                }
                 _ if custom_id == "lockdown_full_setup" => {
                     crate::commands::lockdown::handle_full_setup(&ctx, &component, &state.pool).await
                 }
@@ -92,11 +98,46 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 _ if custom_id.starts_with("userinfo_back_") => {
                     crate::services::user_info_manager::handle_user_info_back(&ctx, &component, &state.pool).await
                 }
+                _ if custom_id.starts_with("history_names_") => {
+                    let parts: Vec<&str> = custom_id.split('_').collect();
+                    if parts.len() == 3 {
+                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                        crate::services::history_manager::handle_names_button(&ctx, &component, user_id, &state.pool).await
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ if custom_id.starts_with("history_nicknames_") => {
+                    let parts: Vec<&str> = custom_id.split('_').collect();
+                    if parts.len() == 3 {
+                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                        crate::services::history_manager::handle_nicknames_button(&ctx, &component, user_id, &state.pool).await
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ if custom_id.starts_with("history_avatars_") => {
+                    let parts: Vec<&str> = custom_id.split('_').collect();
+                    if parts.len() == 4 {
+                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                        let page = parts[3].parse::<usize>().unwrap_or(0);
+                        crate::services::history_manager::handle_avatars_button(&ctx, &component, user_id, page, &state.pool).await
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ if custom_id.starts_with("history_avatar_") => {
+                    let parts: Vec<&str> = custom_id.split('_').collect();
+                    if parts.len() == 4 {
+                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                        let page = parts[3].parse::<usize>().unwrap_or(0);
+                        crate::services::history_manager::handle_avatars_button(&ctx, &component, user_id, page, &state.pool).await
+                    } else {
+                        Ok(())
+                    }
+                }
                 _ if custom_id == "request_access" => {
                     crate::services::member_manager::handle_access_request(&ctx, &component, &guild_config).await
-                }
-                _ if custom_id == "referral_select" => {
-                    crate::services::member_manager::handle_referral_selection(&ctx, &component, &guild_config).await
                 }
                 _ if custom_id.starts_with("approve_") => {
                     crate::services::member_manager::handle_approval_action(&ctx, &component, true, &guild_config).await
@@ -169,6 +210,66 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
 
             if let Err(e) = result {
                 tracing::error!("Error handling component interaction {}: {:?}", custom_id, e);
+            }
+        }
+        Interaction::Modal(modal_submit) => {
+            let custom_id = &modal_submit.data.custom_id;
+            tracing::info!("Received modal submit: {}", custom_id);
+
+            let guild_config = if let Some(guild_id) = modal_submit.guild_id {
+                match crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await {
+                    Ok(Some(config)) => config,
+                    _ => crate::models::Guild {
+                        guild_id: guild_id.to_string(),
+                        prefix: None,
+                        member_role_id: None,
+                        staff_channel_id: None,
+                        welcome_channel_id: None,
+                        log_channel_id: None,
+                        admin_role_id: None,
+                        staff_role_id: None,
+                        ticket_category_id: None,
+                        frin_monitor_channel_id: None,
+                        modules: serde_json::json!({}),
+                        webhook_url: None,
+                        premium: None,
+                        track_mute: None,
+                        track_deaf: None,
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                    }
+                }
+            } else {
+                crate::models::Guild {
+                    guild_id: "0".to_string(),
+                    prefix: None,
+                    member_role_id: None,
+                    staff_channel_id: None,
+                    welcome_channel_id: None,
+                    log_channel_id: None,
+                    admin_role_id: None,
+                    staff_role_id: None,
+                    ticket_category_id: None,
+                    frin_monitor_channel_id: None,
+                    modules: serde_json::json!({}),
+                    webhook_url: None,
+                    premium: None,
+                    track_mute: None,
+                    track_deaf: None,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                }
+            };
+
+            let result = match custom_id.as_str() {
+                "referral_modal" => {
+                    crate::services::member_manager::handle_referral_modal_submit(&ctx, &modal_submit, &guild_config).await
+                }
+                _ => Ok(()),
+            };
+
+            if let Err(e) = result {
+                tracing::error!("Error handling modal submit {}: {:?}", custom_id, e);
             }
         }
         _ => {}

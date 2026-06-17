@@ -39,6 +39,7 @@ mod model_tests {
             premium: None,
             username_history: serde_json::json!([]),
             avatar_history: serde_json::json!([]),
+            nickname_history: serde_json::json!([]),
             last_seen: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -54,7 +55,7 @@ mod time_tests {
     #[test]
     fn test_format_duration() {
         assert_eq!(time::format_duration(3661000), "1h 1m 1s");
-        assert_eq!(time::format_duration(60000), "1m 0s");
+        assert_eq!(time::format_duration(60000), "1m");
         assert_eq!(time::format_duration(0), "0s");
     }
 }

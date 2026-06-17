@@ -56,15 +56,15 @@ pub fn build_avatar_page(user_id: u64, history: &[AvatarEntry], page: usize) -> 
     let next_disabled = safe_page >= total_pages.saturating_sub(1);
 
     let prev_btn = CreateButton::new(format!("avatar_{}_{}", user_id, safe_page.saturating_sub(1)))
-        .label("◀ Anterior")
-        .style(ButtonStyle::Primary)
+        .label("Anterior")
+        .style(ButtonStyle::Secondary)
         .disabled(prev_disabled);
     let next_btn = CreateButton::new(format!("avatar_{}_{}", user_id, safe_page + 1))
-        .label("▶ Próximo")
-        .style(ButtonStyle::Primary)
+        .label("Próximo")
+        .style(ButtonStyle::Secondary)
         .disabled(next_disabled);
     let back_btn = CreateButton::new(format!("userinfo_back_{}", user_id))
-        .label("↩ Ficha")
+        .label("Ficha")
         .style(ButtonStyle::Secondary);
 
     let row = CreateActionRow::Buttons(vec![prev_btn, next_btn, back_btn]);

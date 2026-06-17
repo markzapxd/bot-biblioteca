@@ -156,9 +156,9 @@ pub async fn trigger_raid(ctx: &Context, guild: GuildId, reason: &str, guild_con
     if AUTO_LOCKDOWN {
         let guild_clone = guild.to_guild_cached(ctx).map(|g| g.clone());
         if let Some(guild_clone) = guild_clone {
-            let _ = apply_lockdown(ctx, &guild_clone, true).await;
+            let _ = apply_lockdown(ctx, &guild_clone, true, guild_config).await;
         } else if let Ok(guild_obj) = guild.to_partial_guild(&ctx.http).await {
-            let _ = apply_lockdown_partial(ctx, &guild_obj, true).await;
+            let _ = apply_lockdown_partial(ctx, &guild_obj, true, guild_config).await;
         }
     }
 
@@ -184,11 +184,16 @@ pub async fn disable_raid_mode(ctx: &Context, guild_id: GuildId) -> Result<()> {
         }
     }
 
+    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned()
+        .ok_or_else(|| BotError::Internal("No bot state".into()))?;
+    let guild_config = crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await?
+        .ok_or_else(|| BotError::NotFound("Guild config not found".into()))?;
+
     let guild_clone = guild_id.to_guild_cached(ctx).map(|g| g.clone());
     if let Some(guild_clone) = guild_clone {
-        let _ = apply_lockdown(ctx, &guild_clone, false).await;
+        let _ = apply_lockdown(ctx, &guild_clone, false, &guild_config).await;
     } else if let Ok(guild_obj) = guild_id.to_partial_guild(&ctx.http).await {
-        let _ = apply_lockdown_partial(ctx, &guild_obj, false).await;
+        let _ = apply_lockdown_partial(ctx, &guild_obj, false, &guild_config).await;
     }
 
     Ok(())
@@ -246,94 +251,210 @@ pub async fn punish(ctx: &Context, member: &Member, reason: &str, guild_config: 
     Ok(())
 }
 
-pub async fn apply_lockdown(ctx: &Context, guild: &serenity::all::Guild, enable: bool) -> Result<()> {
+pub async fn apply_lockdown(ctx: &Context, guild: &serenity::all::Guild, enable: bool, guild_config: &Guild) -> Result<()> {
     let everyone_role_id = RoleId::new(guild.id.get());
     let channels = guild.channels(&ctx.http).await?;
 
-    for (_, mut channel) in channels {
-        if channel.kind == ChannelType::Text {
-            let mut overwrites = channel.permission_overwrites.clone();
-            let idx = overwrites.iter().position(|o| {
-                matches!(o.kind, PermissionOverwriteType::Role(rid) if rid == everyone_role_id)
-            });
+    let mut skipped_categories = std::collections::HashSet::new();
+    if let Some(v_id) = &guild_config.welcome_channel_id {
+        if let Ok(id) = v_id.parse::<u64>() {
+            if let Some(ch) = channels.get(&ChannelId::new(id)) {
+                if let Some(parent) = ch.parent_id {
+                    skipped_categories.insert(parent);
+                }
+            }
+        }
+    }
+    if let Some(s_id) = &guild_config.staff_channel_id {
+        if let Ok(id) = s_id.parse::<u64>() {
+            if let Some(ch) = channels.get(&ChannelId::new(id)) {
+                if let Some(parent) = ch.parent_id {
+                    skipped_categories.insert(parent);
+                }
+            }
+        }
+    }
 
-            let new_overwrite = if let Some(i) = idx {
-                let existing = &overwrites[i];
-                let mut deny = existing.deny;
+    for (_, mut channel) in channels {
+        let should_process = match channel.kind {
+            ChannelType::Category => {
+                !skipped_categories.contains(&channel.id)
+            }
+            ChannelType::Text | ChannelType::Voice => {
+                let is_verify = guild_config.welcome_channel_id.as_ref()
+                    .map_or(false, |id| channel.id.to_string() == *id);
+                let is_staff = guild_config.staff_channel_id.as_ref()
+                    .map_or(false, |id| channel.id.to_string() == *id);
+
+                !(is_verify || is_staff)
+            }
+            _ => false,
+        };
+
+        if !should_process {
+            continue;
+        }
+
+        let mut overwrites = channel.permission_overwrites.clone();
+        let idx = overwrites.iter().position(|o| {
+            matches!(o.kind, PermissionOverwriteType::Role(rid) if rid == everyone_role_id)
+        });
+
+        let new_overwrite = if let Some(i) = idx {
+            let existing = &overwrites[i];
+            let mut deny = existing.deny;
+            if channel.kind == ChannelType::Voice {
+                if enable {
+                    deny |= Permissions::CONNECT;
+                } else {
+                    deny &= !Permissions::CONNECT;
+                }
+            } else if channel.kind == ChannelType::Category {
+                if enable {
+                    deny |= Permissions::SEND_MESSAGES | Permissions::CONNECT;
+                } else {
+                    deny &= !(Permissions::SEND_MESSAGES | Permissions::CONNECT);
+                }
+            } else {
                 if enable {
                     deny |= Permissions::SEND_MESSAGES;
                 } else {
                     deny &= !Permissions::SEND_MESSAGES;
                 }
-                PermissionOverwrite {
-                    kind: existing.kind,
-                    allow: existing.allow,
-                    deny,
-                }
+            }
+            PermissionOverwrite {
+                kind: existing.kind,
+                allow: existing.allow,
+                deny,
+            }
+        } else {
+            let deny = if channel.kind == ChannelType::Voice {
+                if enable { Permissions::CONNECT } else { Permissions::empty() }
+            } else if channel.kind == ChannelType::Category {
+                if enable { Permissions::SEND_MESSAGES | Permissions::CONNECT } else { Permissions::empty() }
             } else {
-                PermissionOverwrite {
-                    kind: PermissionOverwriteType::Role(everyone_role_id),
-                    allow: Permissions::empty(),
-                    deny: if enable { Permissions::SEND_MESSAGES } else { Permissions::empty() },
-                }
+                if enable { Permissions::SEND_MESSAGES } else { Permissions::empty() }
             };
-
-            if let Some(i) = idx {
-                overwrites[i] = new_overwrite;
-            } else {
-                overwrites.push(new_overwrite);
+            PermissionOverwrite {
+                kind: PermissionOverwriteType::Role(everyone_role_id),
+                allow: Permissions::empty(),
+                deny,
             }
+        };
 
-            if let Err(e) = channel.edit(&ctx.http, EditChannel::new().permissions(overwrites)).await {
-                error!("Failed to edit channel {} permissions: {}", channel.id, e);
-            }
+        if let Some(i) = idx {
+            overwrites[i] = new_overwrite;
+        } else {
+            overwrites.push(new_overwrite);
+        }
+
+        if let Err(e) = channel.edit(&ctx.http, EditChannel::new().permissions(overwrites)).await {
+            error!("Failed to edit channel {} permissions: {}", channel.id, e);
         }
     }
 
     Ok(())
 }
 
-async fn apply_lockdown_partial(ctx: &Context, guild: &PartialGuild, enable: bool) -> Result<()> {
+async fn apply_lockdown_partial(ctx: &Context, guild: &PartialGuild, enable: bool, guild_config: &Guild) -> Result<()> {
     let everyone_role_id = RoleId::new(guild.id.get());
     let channels = guild.channels(&ctx.http).await?;
 
-    for (_, mut channel) in channels {
-        if channel.kind == ChannelType::Text {
-            let mut overwrites = channel.permission_overwrites.clone();
-            let idx = overwrites.iter().position(|o| {
-                matches!(o.kind, PermissionOverwriteType::Role(rid) if rid == everyone_role_id)
-            });
+    let mut skipped_categories = std::collections::HashSet::new();
+    if let Some(v_id) = &guild_config.welcome_channel_id {
+        if let Ok(id) = v_id.parse::<u64>() {
+            if let Some(ch) = channels.get(&ChannelId::new(id)) {
+                if let Some(parent) = ch.parent_id {
+                    skipped_categories.insert(parent);
+                }
+            }
+        }
+    }
+    if let Some(s_id) = &guild_config.staff_channel_id {
+        if let Ok(id) = s_id.parse::<u64>() {
+            if let Some(ch) = channels.get(&ChannelId::new(id)) {
+                if let Some(parent) = ch.parent_id {
+                    skipped_categories.insert(parent);
+                }
+            }
+        }
+    }
 
-            let new_overwrite = if let Some(i) = idx {
-                let existing = &overwrites[i];
-                let mut deny = existing.deny;
+    for (_, mut channel) in channels {
+        let should_process = match channel.kind {
+            ChannelType::Category => {
+                !skipped_categories.contains(&channel.id)
+            }
+            ChannelType::Text | ChannelType::Voice => {
+                let is_verify = guild_config.welcome_channel_id.as_ref()
+                    .map_or(false, |id| channel.id.to_string() == *id);
+                let is_staff = guild_config.staff_channel_id.as_ref()
+                    .map_or(false, |id| channel.id.to_string() == *id);
+
+                !(is_verify || is_staff)
+            }
+            _ => false,
+        };
+
+        if !should_process {
+            continue;
+        }
+
+        let mut overwrites = channel.permission_overwrites.clone();
+        let idx = overwrites.iter().position(|o| {
+            matches!(o.kind, PermissionOverwriteType::Role(rid) if rid == everyone_role_id)
+        });
+
+        let new_overwrite = if let Some(i) = idx {
+            let existing = &overwrites[i];
+            let mut deny = existing.deny;
+            if channel.kind == ChannelType::Voice {
+                if enable {
+                    deny |= Permissions::CONNECT;
+                } else {
+                    deny &= !Permissions::CONNECT;
+                }
+            } else if channel.kind == ChannelType::Category {
+                if enable {
+                    deny |= Permissions::SEND_MESSAGES | Permissions::CONNECT;
+                } else {
+                    deny &= !(Permissions::SEND_MESSAGES | Permissions::CONNECT);
+                }
+            } else {
                 if enable {
                     deny |= Permissions::SEND_MESSAGES;
                 } else {
                     deny &= !Permissions::SEND_MESSAGES;
                 }
-                PermissionOverwrite {
-                    kind: existing.kind,
-                    allow: existing.allow,
-                    deny,
-                }
+            }
+            PermissionOverwrite {
+                kind: existing.kind,
+                allow: existing.allow,
+                deny,
+            }
+        } else {
+            let deny = if channel.kind == ChannelType::Voice {
+                if enable { Permissions::CONNECT } else { Permissions::empty() }
+            } else if channel.kind == ChannelType::Category {
+                if enable { Permissions::SEND_MESSAGES | Permissions::CONNECT } else { Permissions::empty() }
             } else {
-                PermissionOverwrite {
-                    kind: PermissionOverwriteType::Role(everyone_role_id),
-                    allow: Permissions::empty(),
-                    deny: if enable { Permissions::SEND_MESSAGES } else { Permissions::empty() },
-                }
+                if enable { Permissions::SEND_MESSAGES } else { Permissions::empty() }
             };
-
-            if let Some(i) = idx {
-                overwrites[i] = new_overwrite;
-            } else {
-                overwrites.push(new_overwrite);
+            PermissionOverwrite {
+                kind: PermissionOverwriteType::Role(everyone_role_id),
+                allow: Permissions::empty(),
+                deny,
             }
+        };
 
-            if let Err(e) = channel.edit(&ctx.http, EditChannel::new().permissions(overwrites)).await {
-                error!("Failed to edit channel {} permissions: {}", channel.id, e);
-            }
+        if let Some(i) = idx {
+            overwrites[i] = new_overwrite;
+        } else {
+            overwrites.push(new_overwrite);
+        }
+
+        if let Err(e) = channel.edit(&ctx.http, EditChannel::new().permissions(overwrites)).await {
+            error!("Failed to edit channel {} permissions: {}", channel.id, e);
         }
     }
 

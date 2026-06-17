@@ -26,7 +26,11 @@ async fn handle_reloadslash(ctx: &Context, msg: &Message) -> crate::errors::Resu
         crate::errors::BotError::Validation("Comando apenas em servidor".into())
     })?;
     let member = guild_id.member(ctx, msg.author.id).await?;
-    if let Err(e) = permissions::require_admin(msg.author.id.get(), &member) {
+    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned()
+        .ok_or_else(|| crate::errors::BotError::Internal("No bot state".into()))?;
+    let guild_config = crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await?
+        .ok_or_else(|| crate::errors::BotError::Validation("Guild config not found".into()))?;
+    if let Err(e) = permissions::require_admin(msg.author.id.get(), &member, &guild_config) {
         let _ = msg.reply(ctx, format!("{}", e)).await;
         return Ok(());
     }

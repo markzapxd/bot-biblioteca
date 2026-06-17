@@ -55,6 +55,6 @@ fn build_privacy_embed(is_private: bool) -> CreateEmbed {
 fn build_privacy_row(is_private: bool) -> CreateActionRow {
     let btn = CreateButton::new("privacy_toggle")
         .label(if is_private { "Desativar" } else { "Ativar" })
-        .style(if is_private { ButtonStyle::Danger } else { ButtonStyle::Success });
+        .style(ButtonStyle::Secondary);
     CreateActionRow::Buttons(vec![btn])
 }

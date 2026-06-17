@@ -4,3 +4,4 @@ pub mod ticket_manager;
 pub mod log_manager;
 pub mod avatar_manager;
 pub mod user_info_manager;
+pub mod history_manager;

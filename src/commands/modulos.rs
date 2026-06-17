@@ -26,10 +26,10 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
     let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let member = interaction.member.as_ref().ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let user_id = interaction.user.id.get();
-    permissions::require_admin(user_id, member)?;
 
     let guild_id_str = guild_id.to_string();
     let config = guild_cache.get(&guild_id_str).ok_or(crate::errors::BotError::NotFound("Guild config not found".into()))?;
+    permissions::require_admin(user_id, member, &config)?;
     let modules = config.get_modules();
 
     let embed = build_modules_embed(&modules);
@@ -64,7 +64,12 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
     }
 
     let modules_json = serde_json::to_value(&modules)?;
-    guild_repo::update_modules(pool, &guild_id_str, modules_json).await?;
+    guild_repo::update_modules(pool, &guild_id_str, modules_json.clone()).await?;
+
+    // Update Cache
+    let mut updated_config = config.clone();
+    updated_config.modules = modules_json;
+    guild_cache.set(guild_id_str, updated_config);
 
     let embed = build_modules_embed(&modules);
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "modules", embed).await;
@@ -95,19 +100,11 @@ fn build_modules_embed(modules: &crate::models::guild::GuildModules) -> CreateEm
     theme::info("Modulos", &desc.trim())
 }
 
-fn build_modules_row(modules: &crate::models::guild::GuildModules) -> CreateActionRow {
+fn build_modules_row(_modules: &crate::models::guild::GuildModules) -> CreateActionRow {
     let buttons: Vec<CreateButton> = MODULES.iter().map(|(name, label)| {
-        let enabled = match *name {
-            "antiraid" => modules.antiraid,
-            "logs" => modules.logs,
-            "tickets" => modules.tickets,
-            "voice_tracking" => modules.voice_tracking,
-            "member_verification" => modules.member_verification,
-            _ => false,
-        };
         CreateButton::new(format!("modules_toggle_{}", name))
             .label(*label)
-            .style(if enabled { ButtonStyle::Success } else { ButtonStyle::Secondary })
+            .style(ButtonStyle::Secondary)
     }).collect();
     CreateActionRow::Buttons(buttons)
 }

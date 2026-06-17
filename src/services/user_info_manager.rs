@@ -67,7 +67,7 @@ pub async fn build_user_info(
 
     let avatar_btn = CreateButton::new(format!("avatar_{}_0", target_user.id.get()))
         .label("Histórico de Avatares")
-        .style(ButtonStyle::Primary)
+        .style(ButtonStyle::Secondary)
         .disabled(!has_history);
     let row = CreateActionRow::Buttons(vec![avatar_btn]);
 
