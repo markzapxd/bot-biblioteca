@@ -37,8 +37,8 @@ static DEFAULT_ASSETS: &[(&str, &str)] = &[
     ("ticket", "ticket.png"),
     ("admin", "admin.png"),
     ("default", "default.png"),
-    ("approved", "approved.png"),
-    ("rejected", "rejected.png"),
+    ("approved", "approved.webp"),
+    ("rejected", "rejected.gif"),
 ];
 
 #[derive(Debug, Clone)]

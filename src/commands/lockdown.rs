@@ -49,7 +49,7 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
     let guild_id = component.guild_id.ok_or(BotError::Validation("Guild only".into()))?;
     let guild_id_str = guild_id.to_string();
 
-    // Read config to check admin role
+    
     let guild_config = guild_repo::find_by_id(pool, &guild_id_str).await?
         .unwrap_or_else(|| crate::models::Guild {
             guild_id: guild_id_str.clone(),
@@ -76,22 +76,22 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         CreateInteractionResponseMessage::new().ephemeral(true)
     )).await?;
 
-    // 1. Criar cargos
+    
     let member_role = guild_id.create_role(&ctx, EditRole::new().name(".").colour(Colour::new(0xFFFFFF))).await?;
     let staff_role = guild_id.create_role(&ctx, EditRole::new().name(".").colour(Colour::new(0x000001))).await?;
 
-    // 2. Criar canais
+    
     let mut verify_channel = guild_id.create_channel(&ctx, CreateChannel::new("verify").kind(ChannelType::Text)).await?;
     let mut staff_channel = guild_id.create_channel(&ctx, CreateChannel::new("segregação").kind(ChannelType::Text)).await?;
 
-    // 3. Salvar no config (para o toggle usar depois)
+    
     guild_repo::upsert(pool, &guild_id_str).await?;
     guild_repo::update_field(pool, &guild_id_str, "member_role_id", &member_role.id.to_string()).await?;
     guild_repo::update_field(pool, &guild_id_str, "staff_role_id", &staff_role.id.to_string()).await?;
     guild_repo::update_field(pool, &guild_id_str, "welcome_channel_id", &verify_channel.id.to_string()).await?;
     guild_repo::update_field(pool, &guild_id_str, "staff_channel_id", &staff_channel.id.to_string()).await?;
 
-    // Re-read config to get admin_role_id (must be set via /setup beforehand)
+    
     let guild_config = guild_repo::find_by_id(pool, &guild_id_str).await?
         .ok_or(BotError::Validation("Guild config not found".into()))?;
 
@@ -99,7 +99,7 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         .and_then(|s| s.parse::<u64>().ok())
         .map(RoleId::new);
 
-    // 4. Trancar todos os canais de texto, voz e categorias (exceto verify e staff e suas categorias)
+    
     let channels = guild_id.channels(&ctx.http).await.unwrap_or_default();
     let everyone_role_id = guild_id.everyone_role();
     let mut channel_count = 0u32;
@@ -136,14 +136,14 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
 
         let mut overwrites = Vec::new();
 
-        // @everyone: negar view
+        
         overwrites.push(PermissionOverwrite {
             kind: PermissionOverwriteType::Role(everyone_role_id),
             allow: Permissions::empty(),
             deny: Permissions::VIEW_CHANNEL,
         });
 
-        // member_role: permitir view + send ou view + connect (ou ambos para categorias)
+        
         let allow_permissions = match channel.kind {
             ChannelType::Voice => Permissions::VIEW_CHANNEL | Permissions::CONNECT | Permissions::SPEAK,
             ChannelType::Text => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS,
@@ -155,7 +155,7 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
             deny: Permissions::empty(),
         });
 
-        // admin_role: permitir tudo
+        
         if let Some(admin_rid) = admin_role_id {
             let admin_allow_permissions = match channel.kind {
                 ChannelType::Voice => Permissions::VIEW_CHANNEL | Permissions::CONNECT | Permissions::SPEAK | Permissions::MUTE_MEMBERS | Permissions::DEAFEN_MEMBERS | Permissions::MOVE_MEMBERS,
@@ -176,17 +176,22 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         }
     }
 
-    // 5. Configurar permissões do canal verify
-    //    - @everyone: pode ver (pra quem NÃO tem member_role)
-    //    - member_role: negado (já está verificado)
-    //    - admin: full access
+    
+    
+    
+    
+    
     {
         let mut verify_overwrites = Vec::new();
 
         verify_overwrites.push(PermissionOverwrite {
             kind: PermissionOverwriteType::Role(everyone_role_id),
             allow: Permissions::VIEW_CHANNEL,
-            deny: Permissions::empty(),
+            deny: Permissions::SEND_MESSAGES
+                | Permissions::SEND_MESSAGES_IN_THREADS
+                | Permissions::CREATE_PUBLIC_THREADS
+                | Permissions::CREATE_PRIVATE_THREADS
+                | Permissions::ADD_REACTIONS,
         });
 
         verify_overwrites.push(PermissionOverwrite {
@@ -208,10 +213,10 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         }
     }
 
-    // 6. Configurar permissões do canal segregação
-    //    - @everyone: negado
-    //    - staff_role: full access
-    //    - admin: full access
+    
+    
+    
+    
     {
         let mut staff_overwrites = Vec::new();
 
@@ -223,8 +228,12 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
 
         staff_overwrites.push(PermissionOverwrite {
             kind: PermissionOverwriteType::Role(staff_role.id),
-            allow: Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES,
-            deny: Permissions::empty(),
+            allow: Permissions::VIEW_CHANNEL,
+            deny: Permissions::SEND_MESSAGES
+                | Permissions::SEND_MESSAGES_IN_THREADS
+                | Permissions::CREATE_PUBLIC_THREADS
+                | Permissions::CREATE_PRIVATE_THREADS
+                | Permissions::ADD_REACTIONS,
         });
 
         if let Some(admin_rid) = admin_role_id {
@@ -240,7 +249,7 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         }
     }
 
-    // 7. Postar painel de verificação no canal verify
+    
     {
         let panel_embed = CreateEmbed::new()
             .title("VERIFICAÇÃO")
@@ -261,7 +270,7 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         let _ = verify_channel.send_message(&ctx.http, panel_msg).await;
     }
 
-    // 8. Resposta de sucesso
+    
     let embed = crate::theme::success(
         "Lockdown + Configuração de Verificação",
         &format!(
@@ -375,7 +384,7 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
         let mut overwrites = channel.permission_overwrites.clone();
 
         if currently_locked {
-            // Unlocking
+            
             for o in &mut overwrites {
                 match o.kind {
                     PermissionOverwriteType::Role(rid) if rid == everyone_role_id => {
@@ -396,7 +405,7 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
                 }
             }
         } else {
-            // Locking
+            
             let mut everyone_found = false;
             let mut member_found = false;
             let mut admin_found = false;

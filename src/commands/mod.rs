@@ -13,6 +13,7 @@ pub mod modulos;
 pub mod configlogs;
 pub mod names;
 pub mod nuke;
+pub mod owner;
 pub mod privacy;
 pub mod raidmode;
 pub mod removeticket;
@@ -73,6 +74,7 @@ pub async fn route(ctx: &Context, interaction: &CommandInteraction, state: &BotS
         "configlogs" => configlogs::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "names" | "nomes" => names::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "nuke" => nuke::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
+        "owner" => owner::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "privacy" | "privacidade" => privacy::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "raidmode" | "modoraid" => raidmode::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "removeticket" => removeticket::handle(ctx, interaction, &state.pool, &state.guild_cache).await,

@@ -6,7 +6,7 @@ pub async fn handle(ctx: Context, channel_id: ChannelId, deleted_message_id: Mes
         if let Some(state) = ctx.data.read().await.get::<crate::state::BotStateKey>() {
             let pool = &state.pool;
             
-            // Try to find in cache
+            
             let msg_info = ctx.cache.message(channel_id, deleted_message_id)
                 .map(|m| (m.content.clone(), m.author.name.clone()));
                 

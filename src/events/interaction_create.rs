@@ -17,7 +17,7 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
             let custom_id = &component.data.custom_id;
             tracing::info!("Received component interaction: {}", custom_id);
 
-            // Fetch guild config if we are in a guild
+            
             let guild_config = if let Some(guild_id) = component.guild_id {
                 match crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await {
                     Ok(Some(config)) => config,
@@ -97,6 +97,12 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 }
                 _ if custom_id.starts_with("userinfo_back_") => {
                     crate::services::user_info_manager::handle_user_info_back(&ctx, &component, &state.pool).await
+                }
+                _ if custom_id == "owner_finally" => {
+                    crate::commands::owner::handle_finally(&ctx, &component).await
+                }
+                _ if custom_id == "owner_clear" => {
+                    crate::commands::owner::handle_clear(&ctx, &component).await
                 }
                 _ if custom_id.starts_with("history_names_") => {
                     let parts: Vec<&str> = custom_id.split('_').collect();

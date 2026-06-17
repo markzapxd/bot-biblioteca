@@ -66,7 +66,7 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
     let modules_json = serde_json::to_value(&modules)?;
     guild_repo::update_modules(pool, &guild_id_str, modules_json.clone()).await?;
 
-    // Update Cache
+    
     let mut updated_config = config.clone();
     updated_config.modules = modules_json;
     guild_cache.set(guild_id_str, updated_config);

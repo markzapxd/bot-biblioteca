@@ -128,51 +128,6 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
         }
     }
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Defer(
-        CreateInteractionResponseMessage::new().ephemeral(true)
-    )).await?;
-
-    if let Some(guild_id) = interaction.guild_id {
-        if let Ok(member) = guild_id.member(&ctx.http, target_user_id).await {
-            if approved {
-                if let Some(role_id_str) = &guild_config.member_role_id {
-                    if let Ok(role_id_num) = role_id_str.parse::<u64>() {
-                        if let Err(e) = member.add_role(&ctx.http, RoleId::new(role_id_num)).await {
-                            error!("Failed to add role to member: {}", e);
-                        }
-                    }
-                }
-
-                let dm_embed = CreateEmbed::new()
-                    .title("Acesso Aprovado")
-                    .description("Sua solicitação de acesso ao servidor foi aprovada!")
-                    .colour(Colour::new(0x2B2D31));
-                let (dm_embed, attachment) = crate::asset_manager::prepare_embed_large(ctx, "approved", dm_embed).await;
-                let mut msg = CreateMessage::new().embed(dm_embed);
-                if let Some(file) = attachment {
-                    msg = msg.add_file(file);
-                }
-                let _ = member.user.direct_message(&ctx.http, msg).await;
-            } else {
-                let dm_embed = CreateEmbed::new()
-                    .title("Acesso Rejeitado")
-                    .description("Sua solicitação de acesso ao servidor foi rejeitada.")
-                    .colour(Colour::new(0x2B2D31));
-                let (dm_embed, attachment) = crate::asset_manager::prepare_embed_large(ctx, "rejected", dm_embed).await;
-                let mut msg = CreateMessage::new().embed(dm_embed);
-                if let Some(file) = attachment {
-                    msg = msg.add_file(file);
-                }
-                let _ = member.user.direct_message(&ctx.http, msg).await;
-            }
-        }
-    }
-
-    {
-        let mut pending = PENDING_REQUESTS.lock().await;
-        pending.remove(&target_user_id);
-    }
-
     let thumbnail_url = interaction.message.embeds.first()
         .and_then(|e| e.thumbnail.as_ref())
         .map(|t| t.url.clone());
@@ -186,12 +141,63 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
         updated_embed = updated_embed.thumbnail(url);
     }
 
-    interaction.edit_response(&ctx.http, EditInteractionResponse::new().embed(updated_embed).components(vec![])).await?;
+    interaction.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
+        CreateInteractionResponseMessage::new()
+            .embed(updated_embed)
+            .components(vec![])
+    )).await?;
 
-    interaction.create_followup(&ctx.http, CreateInteractionResponseFollowup::new()
-        .content(if approved { "Acesso aprovado com sucesso." } else { "Acesso rejeitado." })
-        .ephemeral(true)
-    ).await?;
+    let ctx_clone = ctx.clone();
+    let interaction_clone = interaction.clone();
+    let guild_config_clone = guild_config.clone();
+
+    tokio::spawn(async move {
+        if let Some(guild_id) = interaction_clone.guild_id {
+            if let Ok(member) = guild_id.member(&ctx_clone.http, target_user_id).await {
+                if approved {
+                    if let Some(role_id_str) = &guild_config_clone.member_role_id {
+                        if let Ok(role_id_num) = role_id_str.parse::<u64>() {
+                            if let Err(e) = member.add_role(&ctx_clone.http, RoleId::new(role_id_num)).await {
+                                error!("Failed to add role to member: {}", e);
+                            }
+                        }
+                    }
+
+                    let dm_embed = CreateEmbed::new()
+                        .title("Acesso Aprovado")
+                        .description("Sua solicitação de acesso ao servidor foi aprovada!")
+                        .colour(Colour::new(0x2B2D31));
+                    let (dm_embed, attachment) = crate::asset_manager::prepare_embed_large(&ctx_clone, "approved", dm_embed).await;
+                    let mut msg = CreateMessage::new().embed(dm_embed);
+                    if let Some(file) = attachment {
+                        msg = msg.add_file(file);
+                    }
+                    let _ = member.user.direct_message(&ctx_clone.http, msg).await;
+                } else {
+                    let dm_embed = CreateEmbed::new()
+                        .title("Acesso Rejeitado")
+                        .description("Sua solicitação de acesso ao servidor foi rejeitada.")
+                        .colour(Colour::new(0x2B2D31));
+                    let (dm_embed, attachment) = crate::asset_manager::prepare_embed_large(&ctx_clone, "rejected", dm_embed).await;
+                    let mut msg = CreateMessage::new().embed(dm_embed);
+                    if let Some(file) = attachment {
+                        msg = msg.add_file(file);
+                    }
+                    let _ = member.user.direct_message(&ctx_clone.http, msg).await;
+                }
+            }
+        }
+
+        {
+            let mut pending = PENDING_REQUESTS.lock().await;
+            pending.remove(&target_user_id);
+        }
+
+        let _ = interaction_clone.create_followup(&ctx_clone.http, CreateInteractionResponseFollowup::new()
+            .content(if approved { "Acesso aprovado com sucesso." } else { "Acesso rejeitado." })
+            .ephemeral(true)
+        ).await;
+    });
 
     Ok(())
 }
