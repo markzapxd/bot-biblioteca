@@ -62,7 +62,7 @@ pub async fn handle_membro(ctx: &Context, component: &ComponentInteraction) -> R
         .title("Comandos — Membros")
         .colour(Colour::new(0x2B2D31))
         .field("Geral", "**`/help`** — Mostrar esta ajuda\n**`/info`** — Informacoes do servidor\n**`/lookup`** — Buscar informacoes de um usuario", false)
-        .field("Usuario", "**`/userinfo`** / **`/ficha`** — Ficha tactica do usuario\n**`/names`** / **`/nomes`** — Historico de nomes\n**`/privacy`** / **`/privacidade`** — Alternar modo privado", false)
+        .field("Usuario", "**`/user`** / **`/ficha`** — Ficha tactica do usuario\n**`/names`** / **`/nomes`** — Historico de nomes\n**`/privacy`** / **`/privacidade`** — Alternar modo privado", false)
         .field("Voz", "**`/stats`** / **`/ranking`** — Ranking de tempo em voz\n**`/lastcall`** / **`/ultimochamada`** — Ultima sessao de voz\n**`/voicehistory`** / **`/historicovoz`** — Historico completo", false);
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "help", embed).await;
 

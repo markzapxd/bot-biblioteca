@@ -6,7 +6,7 @@ use crate::services::user_info_manager;
 
 pub fn register(commands: &mut Vec<CreateCommand>) {
     commands.push(
-        CreateCommand::new("userinfo")
+        CreateCommand::new("user")
             .description("Tactical user file")
             .add_option(CreateCommandOption::new(CommandOptionType::User, "user", "Target user").required(true)),
     );

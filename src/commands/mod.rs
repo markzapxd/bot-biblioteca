@@ -101,7 +101,7 @@ pub async fn route(ctx: &Context, interaction: &CommandInteraction, state: &BotS
         "stats" | "ranking" => stats::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "sync" => sync::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "ticketpanel" => ticketpanel::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
-        "userinfo" | "ficha" => userinfo::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
+        "user" | "ficha" => userinfo::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "verify" | "v" => verification::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "voicehistory" | "historicovoz" => voicehistory::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         _ => Ok(()),

@@ -52,18 +52,20 @@ pub async fn build_user_info(
     let total_voice = user.total_voice_time.unwrap_or(0);
     let voice_formatted = crate::utils::time::format_duration(total_voice);
 
-    let mut embed = CreateEmbed::new()
-        .title(format!("Ficha de {}", target_user.name))
-        .thumbnail(target_user.face())
-        .field("ID", target_user.id.to_string(), true)
-        .field("Conta Criada", account_created.format("%d/%m/%Y %H:%M").to_string(), true)
-        .field("Privado", if is_private { "Sim" } else { "Não" }, true)
-        .field("Tempo em Voz", voice_formatted, true)
-        .colour(Colour::new(0x2B2D31));
-
-    if let Some(joined) = guild_join_date {
-        embed = embed.field("Entrou no Servidor", joined.format("%d/%m/%Y %H:%M").to_string(), true);
-    }
+    let embed = {
+        let mut e = CreateEmbed::new()
+            .title(format!("Ficha de {}", target_user.name))
+            .thumbnail(target_user.face())
+            .field("**ID**", format!("`{}`", target_user.id), true)
+            .field("**Conta Criada**", format!("`{}`", account_created.format("%d/%m/%Y %H:%M")), true)
+            .field("**Privado**", format!("`{}`", if is_private { "Sim" } else { "Não" }), true)
+            .field("**Tempo em Voz**", format!("`{}`", voice_formatted), true)
+            .colour(Colour::new(0x2B2D31));
+        if let Some(joined) = guild_join_date {
+            e = e.field("**Entrou no Servidor**", format!("`{}`", joined.format("%d/%m/%Y %H:%M")), true);
+        }
+        e
+    };
 
     let avatar_btn = CreateButton::new(format!("avatar_{}_0", target_user.id.get()))
         .label("Histórico de Avatares")

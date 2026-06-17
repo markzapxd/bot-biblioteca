@@ -9,7 +9,7 @@ use crate::services::history_manager;
 pub fn register(commands: &mut Vec<CreateCommand>) {
     commands.push(
         CreateCommand::new("names")
-            .description("User history — names, avatars and nicknames")
+            .description("User history — names and nicknames")
             .add_option(CreateCommandOption::new(CommandOptionType::User, "user", "Target user").required(true)),
     );
 }

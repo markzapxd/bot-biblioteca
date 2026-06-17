@@ -19,13 +19,11 @@ pub async fn handle(ctx: Context, old: Option<CurrentUser>, new: CurrentUser) {
                     updated = true;
                 }
                 if old_user.avatar != new.avatar {
-                    if let Some(avatar) = new.avatar {
-                        avatar_history.push(crate::models::AvatarEntry {
-                            url: avatar.to_string(),
-                            date: chrono::Utc::now(),
-                        });
-                        updated = true;
-                    }
+                    avatar_history.push(crate::models::AvatarEntry {
+                        url: new.face(),
+                        date: chrono::Utc::now(),
+                    });
+                    updated = true;
                 }
             }
 

@@ -85,7 +85,7 @@ pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInt
         .description(format!("<@{}> solicitou acesso ao servidor.", user_id))
         .field("Quem chamou", format!("**`{}`**", referral_text), false)
         .field("ID do usuário", format!("`{}`", user_id), true)
-        .image(avatar_url)
+        .thumbnail(avatar_url)
         .colour(Colour::new(0x2B2D31));
 
     let approve_btn = CreateButton::new(format!("approve_{}", user_id))
