@@ -58,6 +58,19 @@ pub async fn register_all(commands: &mut Vec<CreateCommand>) {
 }
 
 pub async fn route(ctx: &Context, interaction: &CommandInteraction, state: &BotState) -> Result<()> {
+    if let Some(guild_id) = interaction.guild_id {
+        let guild_id_str = guild_id.to_string();
+        if state.guild_cache.get(&guild_id_str).is_none() {
+            let config = match crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id_str).await? {
+                Some(c) => c,
+                None => {
+                    crate::repositories::guild_repo::upsert(&state.pool, &guild_id_str).await?
+                }
+            };
+            state.guild_cache.set(guild_id_str, config);
+        }
+    }
+
     match interaction.data.name.as_str() {
         "addticket" => addticket::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "admin" => admin::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
