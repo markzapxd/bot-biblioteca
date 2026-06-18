@@ -55,7 +55,7 @@ pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInt
     let user_id = modal_submit.user.id.get();
 
     {
-        let mut pending = PENDING_REQUESTS.lock().await;
+        let pending = PENDING_REQUESTS.lock().await;
         if pending.contains(&user_id) {
             modal_submit.create_response(&ctx.http, CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
@@ -64,7 +64,6 @@ pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInt
             )).await?;
             return Ok(());
         }
-        pending.insert(user_id);
     }
 
     let referral_text = modal_submit.data.components.first()
@@ -108,6 +107,12 @@ pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInt
             error!("Falha ao enviar solicitacão de acesso para o canal {}: {:?}", channel_id, e);
             crate::errors::BotError::Internal("Não foi possivel enviar a solicitacão.".into())
         })?;
+
+    // Só marca como pendente DEPOIS de ter enviado com sucesso
+    {
+        let mut pending = PENDING_REQUESTS.lock().await;
+        pending.insert(user_id);
+    }
 
     modal_submit.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
@@ -179,7 +184,13 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
                     if let Some(file) = attachment {
                         msg = msg.add_file(file);
                     }
-                    let _ = member.user.direct_message(&ctx_clone.http, msg).await;
+                    if let Ok(sent) = member.user.direct_message(&ctx_clone.http, msg).await {
+                        let http = ctx_clone.http.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                            let _ = sent.delete(&http).await;
+                        });
+                    }
                 } else {
                     let dm_embed = CreateEmbed::new()
                         .title("Acesso Rejeitado")
@@ -190,7 +201,13 @@ pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentIntera
                     if let Some(file) = attachment {
                         msg = msg.add_file(file);
                     }
-                    let _ = member.user.direct_message(&ctx_clone.http, msg).await;
+                    if let Ok(sent) = member.user.direct_message(&ctx_clone.http, msg).await {
+                        let http = ctx_clone.http.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                            let _ = sent.delete(&http).await;
+                        });
+                    }
                 }
             }
         }
