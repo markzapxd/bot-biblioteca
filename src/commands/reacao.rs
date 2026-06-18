@@ -90,7 +90,13 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         .map(|(_, _, text)| *text)
         .unwrap_or("reagiu");
 
-    let response_text = reqwest::get(format!("https://nekos.best/api/v2/{}", endpoint))
+    let client = reqwest::Client::builder()
+        .user_agent("Bibliotecaria/0.1.0 (https://github.com/markzapxd/bot-biblioteca)")
+        .build()
+        .map_err(|e| BotError::Internal(format!("Falha ao criar cliente HTTP: {}", e)))?;
+
+    let response_text = client.get(format!("https://nekos.best/api/v2/{}", endpoint))
+        .send()
         .await
         .map_err(|e| BotError::Internal(format!("Falha na API nekos.best: {}", e)))?
         .text()
