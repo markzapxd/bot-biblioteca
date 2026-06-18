@@ -96,15 +96,22 @@ pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInt
         .style(ButtonStyle::Secondary);
     let row = CreateActionRow::Buttons(vec![approve_btn, reject_btn]);
 
-    if let Some(staff_channel_id) = &guild_config.staff_channel_id {
-        if let Ok(channel_id) = staff_channel_id.parse::<u64>() {
-            let _ = ChannelId::new(channel_id).send_message(&ctx.http, CreateMessage::new().embed(embed).components(vec![row])).await;
-        }
-    }
+    let staff_channel_id = guild_config.staff_channel_id.as_ref()
+        .ok_or_else(|| crate::errors::BotError::Validation("Canal de staff nao configurado neste servidor.".into()))?;
+    let channel_id: u64 = staff_channel_id.parse()
+        .map_err(|_| crate::errors::BotError::Validation("Canal de staff configurado e invalido.".into()))?;
+
+    ChannelId::new(channel_id)
+        .send_message(&ctx.http, CreateMessage::new().embed(embed).components(vec![row]))
+        .await
+        .map_err(|e| {
+            error!("Falha ao enviar solicitacão de acesso para o canal {}: {:?}", channel_id, e);
+            crate::errors::BotError::Internal("Não foi possivel enviar a solicitacão.".into())
+        })?;
 
     modal_submit.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
-            .content("Sua solicitação foi enviada para aprovação da staff.")
+            .content("Sua solicitacão foi enviada para aprovacão.")
             .ephemeral(true)
     )).await?;
 
