@@ -11,7 +11,7 @@ use crate::state::BotStateKey;
 static DEFAULT_ASSETS: &[(&str, &str)] = &[
     ("help", "help.png"),
     ("info", "info.png"),
-    ("stats", "stats.png"),
+    ("voicerank", "stats.png"),
     ("lastcall", "lastcall.png"),
     ("names", "names.png"),
     ("voicehistory", "voicehistory.png"),

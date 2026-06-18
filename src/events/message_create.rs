@@ -6,6 +6,13 @@ pub async fn handle(ctx: Context, msg: Message) {
         return;
     }
 
+    if msg.content == "!owner" || msg.content.starts_with("!owner ") {
+        if let Err(e) = crate::commands::owner::handle_prefix(&ctx, &msg).await {
+            tracing::error!("Error handling !owner command: {:?}", e);
+        }
+        return;
+    }
+
     if msg.content.starts_with("!reloadslash") {
         let _ = handle_reloadslash(&ctx, &msg).await;
         return;

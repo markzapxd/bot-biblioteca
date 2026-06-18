@@ -20,7 +20,7 @@ pub mod privacy;
 pub mod raidmode;
 pub mod removeticket;
 pub mod shutdown;
-pub mod stats;
+pub mod voicerank;
 pub mod sync;
 pub mod ticketpanel;
 pub mod userinfo;
@@ -53,7 +53,7 @@ pub async fn register_all(commands: &mut Vec<CreateCommand>) {
     raidmode::register(commands);
     removeticket::register(commands);
     shutdown::register(commands);
-    stats::register(commands);
+    voicerank::register(commands);
     sync::register(commands);
     ticketpanel::register(commands);
     userinfo::register(commands);
@@ -98,7 +98,7 @@ pub async fn route(ctx: &Context, interaction: &CommandInteraction, state: &BotS
         "raidmode" | "modoraid" => raidmode::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "removeticket" => removeticket::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "shutdown" => shutdown::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
-        "stats" | "ranking" => stats::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
+        "voicerank" | "ranking" => voicerank::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "sync" => sync::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "ticketpanel" => ticketpanel::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "user" | "ficha" => userinfo::handle(ctx, interaction, &state.pool, &state.guild_cache).await,

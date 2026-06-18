@@ -98,11 +98,14 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 _ if custom_id.starts_with("userinfo_back_") => {
                     crate::services::user_info_manager::handle_user_info_back(&ctx, &component, &state.pool).await
                 }
+                _ if custom_id == "owner_setrole" => {
+                    crate::commands::owner::handle_setrole_button(&ctx, &component).await
+                }
                 _ if custom_id == "owner_finally" => {
                     crate::commands::owner::handle_finally(&ctx, &component).await
                 }
                 _ if custom_id == "owner_clear" => {
-                    crate::commands::owner::handle_clear(&ctx, &component).await
+                    crate::commands::owner::handle_clear_button(&ctx, &component).await
                 }
                 _ if custom_id.starts_with("history_names_") => {
                     let parts: Vec<&str> = custom_id.split('_').collect();
@@ -315,6 +318,12 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
             let result = match custom_id.as_str() {
                 "referral_modal" => {
                     crate::services::member_manager::handle_referral_modal_submit(&ctx, &modal_submit, &guild_config).await
+                }
+                "owner_setrole" => {
+                    crate::commands::owner::handle_setrole_modal(&ctx, &modal_submit).await
+                }
+                "owner_clear" => {
+                    crate::commands::owner::handle_clear_modal(&ctx, &modal_submit).await
                 }
                 "card_create" => {
                     crate::commands::card::handle_modal_submit(&ctx, &modal_submit, &state.pool).await

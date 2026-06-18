@@ -6,7 +6,7 @@ use crate::repositories::user_repo;
 use crate::utils::time;
 
 pub fn register(commands: &mut Vec<CreateCommand>) {
-    commands.push(CreateCommand::new("stats").description("Voice time ranking"));
+    commands.push(CreateCommand::new("voicerank").description("Voice time ranking"));
 }
 
 pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
