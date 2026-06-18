@@ -117,15 +117,8 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
     };
 
     let mut embed = CreateEmbed::new()
-        .title(sub_name.to_uppercase())
         .image(result.url)
         .colour(Colour::new(0x2B2D31));
-
-    if let Some(anime_name) = &result.anime_name {
-        if !anime_name.is_empty() {
-            embed = embed.footer(CreateEmbedFooter::new(format!("Fonte: {}", anime_name)));
-        }
-    }
 
     interaction.create_response(ctx, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
