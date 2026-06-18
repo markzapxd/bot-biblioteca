@@ -151,6 +151,7 @@ name = "bibliotecaria"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "chrono",
  "dashmap 6.2.1",
  "dotenvy",
