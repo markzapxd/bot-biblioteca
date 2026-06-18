@@ -58,6 +58,17 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         .cloned()
         .ok_or_else(|| BotError::Validation("Imagem nao encontrada".into()))?;
 
+    let filename = attachment.filename.clone();
+    let ext = filename.split('.').last().unwrap_or("").to_lowercase();
+    let accepts_jpg = ext == "jpg" || ext == "jpeg";
+    if ext != "png" && ext != "apng" && !accepts_jpg {
+        return Err(BotError::Validation("Figurinhas aceitam PNG, APNG ou JPG.".into()));
+    }
+
+    if attachment.size > 2_000_000 {
+        return Err(BotError::Validation("Imagem muito grande. Maximo 2 MB antes da conversao.".into()));
+    }
+
     interaction.defer(ctx).await?;
 
     let bytes = reqwest::get(attachment.url)
@@ -67,9 +78,25 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         .await
         .map_err(|e| BotError::Internal(format!("Falha ao ler imagem: {}", e)))?;
 
-    let filename = attachment.filename.clone();
+    let sticker_bytes = if accepts_jpg {
+        let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg)
+            .map_err(|_| BotError::Validation("JPG invalido ou corrompido.".into()))?;
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut cursor, image::ImageFormat::Png)
+            .map_err(|_| BotError::Internal("Falha ao converter JPG para PNG.".into()))?;
+        cursor.into_inner()
+    } else {
+        if bytes.len() < 8 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" {
+            return Err(BotError::Validation("O arquivo nao e um PNG valido.".into()));
+        }
+        bytes.to_vec()
+    };
 
-    let sticker = CreateSticker::new(&nome, CreateAttachment::bytes(bytes, filename))
+    if sticker_bytes.len() > 320_000 {
+        return Err(BotError::Validation("Imagem muito grande apos conversao. Maximo 320 KB.".into()));
+    }
+
+    let sticker = CreateSticker::new(&nome, CreateAttachment::bytes(sticker_bytes, "sticker.png".to_string()))
         .description(format!("Figurinha {} criada via bot", nome))
         .tags("😄");
 

@@ -87,6 +87,16 @@ pub async fn find_by_user(pool: &PgPool, user_id: &str, limit: i64) -> Result<Ve
     Ok(sessions)
 }
 
+pub async fn get_user_stats(pool: &PgPool, user_id: &str) -> Result<(i64, i64)> {
+    let row = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT COUNT(*)::bigint, COALESCE(SUM(duration), 0)::bigint FROM voice_sessions WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
 pub async fn find_last_by_user(pool: &PgPool, user_id: &str) -> Result<Option<VoiceSession>> {
     let session = sqlx::query_as::<_, VoiceSession>(
         "SELECT * FROM voice_sessions WHERE user_id = $1 ORDER BY joined_at DESC LIMIT 1",
@@ -95,6 +105,16 @@ pub async fn find_last_by_user(pool: &PgPool, user_id: &str) -> Result<Option<Vo
     .fetch_optional(pool)
     .await?;
     Ok(session)
+}
+
+pub async fn update_active_durations(pool: &PgPool, now: DateTime<Utc>) -> Result<()> {
+    sqlx::query(
+        "UPDATE voice_sessions SET duration = EXTRACT(EPOCH FROM ($1 - joined_at)) * 1000, updated_at = NOW() WHERE active = TRUE"
+    )
+        .bind(now)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn close_all_active(pool: &PgPool, now: DateTime<Utc>) -> Result<Vec<VoiceSession>> {

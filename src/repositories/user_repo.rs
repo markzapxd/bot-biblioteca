@@ -40,6 +40,25 @@ pub async fn add_voice_time(pool: &PgPool, user_id: &str, duration_ms: i64) -> R
     Ok(())
 }
 
+pub async fn recompute_voice_time(pool: &PgPool, user_id: &str) -> Result<()> {
+    sqlx::query(
+        "UPDATE users u SET total_voice_time = COALESCE((SELECT SUM(vs.duration) FROM voice_sessions vs WHERE vs.user_id = u.user_id), 0), last_seen = NOW(), updated_at = NOW() WHERE u.user_id = $1"
+    )
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn recompute_all_voice_times(pool: &PgPool) -> Result<()> {
+    sqlx::query(
+        "UPDATE users u SET total_voice_time = COALESCE((SELECT SUM(vs.duration) FROM voice_sessions vs WHERE vs.user_id = u.user_id), 0), updated_at = NOW()"
+    )
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn update_username_history(
     pool: &PgPool,
     user_id: &str,
@@ -95,7 +114,7 @@ pub async fn get_voice_ranking(
     limit: i64,
 ) -> Result<Vec<(String, i64)>> {
     let rows = sqlx::query_as::<_, (String, i64)>(
-        "SELECT vs.user_id, COALESCE(SUM(vs.duration), 0) as total_duration FROM voice_sessions vs WHERE vs.guild_id = $1 GROUP BY vs.user_id ORDER BY total_duration DESC LIMIT $2"
+        "SELECT vs.user_id, COALESCE(SUM(vs.duration), 0)::bigint as total_duration FROM voice_sessions vs WHERE vs.guild_id = $1 GROUP BY vs.user_id ORDER BY total_duration DESC LIMIT $2"
     )
         .bind(guild_id)
         .bind(limit)

@@ -16,6 +16,7 @@ pub mod configlogs;
 pub mod emoji;
 pub mod figurinha;
 pub mod names;
+pub mod reacao;
 pub mod nuke;
 pub mod owner;
 pub mod privacy;
@@ -53,6 +54,7 @@ pub async fn register_all(commands: &mut Vec<CreateCommand>) {
     figurinha::register(commands);
     names::register(commands);
     nuke::register(commands);
+    reacao::register(commands);
     privacy::register(commands);
     raidmode::register(commands);
     removeticket::register(commands);
@@ -98,6 +100,7 @@ pub async fn route(ctx: &Context, interaction: &CommandInteraction, state: &BotS
         "emoji" => emoji::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "figurinha" => figurinha::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "names" | "nomes" => names::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
+        "reacao" => reacao::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "nuke" => nuke::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "owner" => owner::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
         "privacy" | "privacidade" => privacy::handle(ctx, interaction, &state.pool, &state.guild_cache).await,
