@@ -40,8 +40,7 @@ struct NekosResponse {
 #[derive(serde::Deserialize)]
 struct NekosResult {
     url: String,
-    #[serde(default)]
-    anime_name: String,
+    anime_name: Option<String>,
 }
 
 pub fn register(commands: &mut Vec<CreateCommand>) {
@@ -91,12 +90,15 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         .map(|(_, _, text)| *text)
         .unwrap_or("reagiu");
 
-    let response: NekosResponse = reqwest::get(format!("https://nekos.best/api/v2/{}", endpoint))
+    let response_text = reqwest::get(format!("https://nekos.best/api/v2/{}", endpoint))
         .await
         .map_err(|e| BotError::Internal(format!("Falha na API nekos.best: {}", e)))?
-        .json()
+        .text()
         .await
-        .map_err(|e| BotError::Internal(format!("Falha ao ler resposta da API: {}", e)))?;
+        .map_err(|e| BotError::Internal(format!("Falha ao ler corpo da resposta da API: {}", e)))?;
+
+    let response: NekosResponse = serde_json::from_str(&response_text)
+        .map_err(|e| BotError::Internal(format!("Falha ao ler resposta da API (json): {}. Corpo: {}", e, response_text)))?;
 
     let result = response.results.into_iter().next()
         .ok_or_else(|| BotError::Internal("API retornou vazio".into()))?;
@@ -113,8 +115,10 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         .image(result.url)
         .colour(Colour::new(0x2B2D31));
 
-    if !result.anime_name.is_empty() {
-        embed = embed.footer(CreateEmbedFooter::new(format!("Fonte: {}", result.anime_name)));
+    if let Some(anime_name) = &result.anime_name {
+        if !anime_name.is_empty() {
+            embed = embed.footer(CreateEmbedFooter::new(format!("Fonte: {}", anime_name)));
+        }
     }
 
     interaction.create_response(ctx, CreateInteractionResponse::Message(

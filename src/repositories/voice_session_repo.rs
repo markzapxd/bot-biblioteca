@@ -117,11 +117,10 @@ pub async fn update_active_durations(pool: &PgPool, now: DateTime<Utc>) -> Resul
     Ok(())
 }
 
-pub async fn close_all_active(pool: &PgPool, now: DateTime<Utc>) -> Result<Vec<VoiceSession>> {
+pub async fn close_all_active(pool: &PgPool, _now: DateTime<Utc>) -> Result<Vec<VoiceSession>> {
     let sessions = sqlx::query_as::<_, VoiceSession>(
-        "UPDATE voice_sessions SET left_at = $1, duration = EXTRACT(EPOCH FROM ($1 - joined_at)) * 1000, active = FALSE, updated_at = NOW() WHERE active = TRUE RETURNING *"
+        "UPDATE voice_sessions SET left_at = updated_at, duration = EXTRACT(EPOCH FROM (updated_at - joined_at)) * 1000, active = FALSE WHERE active = TRUE RETURNING *"
     )
-        .bind(now)
         .fetch_all(pool)
         .await?;
     Ok(sessions)
