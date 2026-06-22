@@ -67,9 +67,18 @@ pub async fn build_user_info(
         e
     };
 
+    let row = if has_history {
+        let btn = CreateButton::new(format!("avatar_{}_0", target_user.id.get()))
+            .label("Ver Avatares")
+            .style(ButtonStyle::Secondary);
+        Some(CreateActionRow::Buttons(vec![btn]))
+    } else {
+        None
+    };
+
     Ok(UserInfoResult {
         embed: Some(embed),
-        action_row: Some(row),
+        action_row: row,
         restricted: false,
         content: None,
     })
