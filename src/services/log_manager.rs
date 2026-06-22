@@ -105,17 +105,12 @@ pub async fn log_voice_leave(ctx: &Context, user_name: &str, avatar_url: &str, c
     send_log(ctx, guild_id, embed, "log_calls", pool).await
 }
 
-pub async fn log_avatar_update(ctx: &Context, user_id: UserId, old_avatar_url: Option<&str>, new_avatar_url: &str, guild_id: u64, pool: &PgPool) -> Result<()> {
-    let mut embed = CreateEmbed::new()
+pub async fn log_avatar_update(ctx: &Context, user_id: UserId, new_avatar_url: &str, guild_id: u64, pool: &PgPool) -> Result<()> {
+    let embed = CreateEmbed::new()
         .title("Avatar Updated")
         .thumbnail(new_avatar_url)
         .field("User", format!("<@{}>", user_id.get()), true)
-        .field("New Avatar", new_avatar_url, false)
         .colour(Colour::new(0x2B2D31));
-
-    if let Some(url) = old_avatar_url {
-        embed = embed.field("Old Avatar", url, false);
-    }
 
     send_log(ctx, guild_id, embed, "log_avatars", pool).await
 }
@@ -125,8 +120,8 @@ pub async fn log_name_update(ctx: &Context, user_id: UserId, old_name: &str, new
         .title("Username Updated")
         .thumbnail(avatar_url)
         .field("User", format!("<@{}>", user_id.get()), true)
-        .field("Old Name", old_name, true)
-        .field("New Name", new_name, true)
+        .field("Old Name", format!("```\n{}\n```", old_name), true)
+        .field("New Name", format!("```\n{}\n```", new_name), true)
         .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, "log_names", pool).await
 }
@@ -136,8 +131,8 @@ pub async fn log_nickname_update(ctx: &Context, user: &User, old_nick: &str, new
         .title("Nickname Updated")
         .thumbnail(user.face())
         .field("User", format!("<@{}>", user.id.get()), true)
-        .field("Old Nickname", old_nick, true)
-        .field("New Nickname", new_nick, true)
+        .field("Old Nickname", format!("```\n{}\n```", old_nick), true)
+        .field("New Nickname", format!("```\n{}\n```", new_nick), true)
         .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, "log_names", pool).await
 }

@@ -59,12 +59,10 @@ pub async fn handle(ctx: Context, old: Option<Member>, new: Option<Member>) {
                 }
 
                 if old_member.user.avatar != member.user.avatar {
-                    let old_avatar_url = old_member.user.face();
                     let new_avatar_url = member.user.face();
                     let _ = crate::services::log_manager::log_avatar_update(
                         &ctx,
                         member.user.id,
-                        Some(&old_avatar_url),
                         &new_avatar_url,
                         guild_id,
                         pool,
