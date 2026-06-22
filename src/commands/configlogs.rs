@@ -55,6 +55,8 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
         "log_joins_leaves" => modules.log_joins_leaves = !modules.log_joins_leaves,
         "log_roles" => modules.log_roles = !modules.log_roles,
         "log_messages" => modules.log_messages = !modules.log_messages,
+        "log_avatars" => modules.log_avatars = !modules.log_avatars,
+        "log_names" => modules.log_names = !modules.log_names,
         _ => return Err(crate::errors::BotError::Validation("Configuração desconhecida".into())),
     }
 
@@ -184,11 +186,15 @@ fn build_logs_embed(config: &crate::models::Guild, modules: &crate::models::guil
         let status_joins = if modules.log_joins_leaves { "**Ativo**" } else { "Desativado" };
         let status_roles = if modules.log_roles { "**Ativo**" } else { "Desativado" };
         let status_messages = if modules.log_messages { "**Ativo**" } else { "Desativado" };
+        let status_avatars = if modules.log_avatars { "**Ativo**" } else { "Desativado" };
+        let status_names = if modules.log_names { "**Ativo**" } else { "Desativado" };
 
         desc.push_str(&format!("Logs de Call: {}\n", status_calls));
         desc.push_str(&format!("Logs de Entradas/Saídas: {}\n", status_joins));
         desc.push_str(&format!("Logs de Cargos: {}\n", status_roles));
         desc.push_str(&format!("Logs de Mensagens: {}\n", status_messages));
+        desc.push_str(&format!("Logs de Avatares: {}\n", status_avatars));
+        desc.push_str(&format!("Logs de Nomes: {}\n", status_names));
     } else {
         desc.push_str("Canal de Logs Não Configurado\n");
         desc.push_str("Nenhuma mensagem de log será enviada até que o canal de logs seja configurado.\n\n");
@@ -211,7 +217,11 @@ fn build_logs_components(config: &crate::models::Guild, _modules: &crate::models
             CreateSelectMenuOption::new("Logs de Cargos", "log_roles")
                 .description("Registra alterações de cargos de membros"),
             CreateSelectMenuOption::new("Logs de Mensagens", "log_messages")
-                .description("Registra edições e exclusões de mensagens")
+                .description("Registra edições e exclusões de mensagens"),
+            CreateSelectMenuOption::new("Logs de Avatares", "log_avatars")
+                .description("Registra alterações de foto de perfil"),
+            CreateSelectMenuOption::new("Logs de Nomes", "log_names")
+                .description("Registra alterações de username e apelido")
         ];
 
         rows.push(CreateActionRow::SelectMenu(

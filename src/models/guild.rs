@@ -43,6 +43,10 @@ pub struct GuildModules {
     pub log_roles: bool,
     #[serde(default = "default_true")]
     pub log_messages: bool,
+    #[serde(default = "default_true")]
+    pub log_avatars: bool,
+    #[serde(default = "default_true")]
+    pub log_names: bool,
 }
 
 fn default_true() -> bool {
@@ -61,6 +65,8 @@ impl Default for GuildModules {
             log_joins_leaves: true,
             log_roles: true,
             log_messages: true,
+            log_avatars: true,
+            log_names: true,
         }
     }
 }
@@ -82,6 +88,8 @@ impl Guild {
             "log_joins_leaves" => modules.log_joins_leaves,
             "log_roles" => modules.log_roles,
             "log_messages" => modules.log_messages,
+            "log_avatars" => modules.log_avatars,
+            "log_names" => modules.log_names,
             _ => false,
         }
     }
