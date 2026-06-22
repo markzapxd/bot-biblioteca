@@ -127,7 +127,10 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 }
                 _ if custom_id.starts_with("history_avatars_") => {
                     let parts: Vec<&str> = custom_id.split('_').collect();
-                    if parts.len() == 4 {
+                    if parts.len() == 3 {
+                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                        crate::services::history_manager::handle_avatars_button(&ctx, &component, user_id, 0, &state.pool).await
+                    } else if parts.len() == 4 {
                         let user_id = parts[2].parse::<u64>().unwrap_or(0);
                         let page = parts[3].parse::<usize>().unwrap_or(0);
                         crate::services::history_manager::handle_avatars_button(&ctx, &component, user_id, page, &state.pool).await

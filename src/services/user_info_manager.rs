@@ -55,7 +55,7 @@ pub async fn build_user_info(
     let embed = {
         let mut e = CreateEmbed::new()
             .title(format!("Ficha de {}", target_user.name))
-            .thumbnail(target_user.face())
+            .thumbnail(format!("{}?size=512", target_user.face()))
             .field("**ID**", format!("`{}`", target_user.id), true)
             .field("**Conta Criada**", format!("`{}`", account_created.format("%d/%m/%Y %H:%M")), true)
             .field("**Privado**", format!("`{}`", if is_private { "Sim" } else { "Não" }), true)
@@ -66,12 +66,6 @@ pub async fn build_user_info(
         }
         e
     };
-
-    let avatar_btn = CreateButton::new(format!("avatar_{}_0", target_user.id.get()))
-        .label("Histórico de Avatares")
-        .style(ButtonStyle::Secondary)
-        .disabled(!has_history);
-    let row = CreateActionRow::Buttons(vec![avatar_btn]);
 
     Ok(UserInfoResult {
         embed: Some(embed),

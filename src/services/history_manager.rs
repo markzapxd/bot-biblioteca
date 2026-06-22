@@ -95,8 +95,12 @@ fn build_navigation_buttons(user_id: u64, active: &str) -> CreateActionRow {
         .label("Apelidos")
         .style(if active == "nicknames" { ButtonStyle::Primary } else { ButtonStyle::Secondary })
         .disabled(active == "nicknames");
+    let avatars_btn = CreateButton::new(format!("history_avatars_{}", user_id))
+        .label("Avatares")
+        .style(if active == "avatars" { ButtonStyle::Primary } else { ButtonStyle::Secondary })
+        .disabled(active == "avatars");
 
-    CreateActionRow::Buttons(vec![names_btn, nicknames_btn])
+    CreateActionRow::Buttons(vec![names_btn, nicknames_btn, avatars_btn])
 }
 
 pub async fn handle_names_button(ctx: &Context, interaction: &ComponentInteraction, user_id: u64, pool: &PgPool) -> Result<()> {
