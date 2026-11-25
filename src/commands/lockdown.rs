@@ -116,6 +116,15 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         }
     }
 
+    let everyone_permissions = guild_id.to_partial_guild(&ctx.http).await?.roles.get(&everyone_role_id).map(|r|r.permissions).unwrap_or_default();
+    let public: std::collections::HashSet<_> = channels.values().filter(|ch| {
+        let visible = |overwrites: &[PermissionOverwrite]| {
+            let mut p = everyone_permissions;
+            if let Some(o) = overwrites.iter().find(|o|o.kind == PermissionOverwriteType::Role(everyone_role_id)) { p.remove(o.deny); p.insert(o.allow); }
+            p.contains(Permissions::VIEW_CHANNEL)
+        };
+        visible(&ch.permission_overwrites) && ch.parent_id.and_then(|id|channels.get(&id)).map_or(true, |parent|visible(&parent.permission_overwrites))
+    }).map(|ch|ch.id).collect();
     for (_, mut channel) in channels {
         let should_process = match channel.kind {
             ChannelType::Category => {
@@ -134,40 +143,7 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
             continue;
         }
 
-        let mut overwrites = Vec::new();
-
-        
-        overwrites.push(PermissionOverwrite {
-            kind: PermissionOverwriteType::Role(everyone_role_id),
-            allow: Permissions::empty(),
-            deny: Permissions::VIEW_CHANNEL,
-        });
-
-        
-        let allow_permissions = match channel.kind {
-            ChannelType::Voice => Permissions::VIEW_CHANNEL | Permissions::CONNECT | Permissions::SPEAK,
-            ChannelType::Text => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS,
-            _ => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::CONNECT | Permissions::SPEAK,
-        };
-        overwrites.push(PermissionOverwrite {
-            kind: PermissionOverwriteType::Role(member_role.id),
-            allow: allow_permissions,
-            deny: Permissions::empty(),
-        });
-
-        
-        if let Some(admin_rid) = admin_role_id {
-            let admin_allow_permissions = match channel.kind {
-                ChannelType::Voice => Permissions::VIEW_CHANNEL | Permissions::CONNECT | Permissions::SPEAK | Permissions::MUTE_MEMBERS | Permissions::DEAFEN_MEMBERS | Permissions::MOVE_MEMBERS,
-                ChannelType::Text => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::MANAGE_MESSAGES,
-                _ => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::MANAGE_MESSAGES | Permissions::CONNECT | Permissions::SPEAK | Permissions::MUTE_MEMBERS | Permissions::DEAFEN_MEMBERS | Permissions::MOVE_MEMBERS,
-            };
-            overwrites.push(PermissionOverwrite {
-                kind: PermissionOverwriteType::Role(admin_rid),
-                allow: admin_allow_permissions,
-                deny: Permissions::empty(),
-            });
-        }
+        let overwrites = crate::services::lockdown::setup_visible_permissions(&channel.permission_overwrites, everyone_role_id, member_role.id, public.contains(&channel.id));
 
         if let Err(e) = channel.edit(&ctx.http, EditChannel::new().permissions(overwrites)).await {
             error!("Erro ao trancar canal/categoria {}: {}", channel.id, e);
@@ -303,193 +279,8 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
 
     permissions::require_admin(user_id, member, &guild_config)?;
 
-    let channels = guild_id.channels(&ctx.http).await.unwrap_or_default();
-    let everyone_role_id = guild_id.everyone_role();
-
-    let member_role_id = guild_config.member_role_id.as_ref()
-        .and_then(|s| s.parse::<u64>().ok())
-        .map(RoleId::new);
-
-    let admin_role_id = guild_config.admin_role_id.as_ref()
-        .and_then(|s| s.parse::<u64>().ok())
-        .map(RoleId::new);
-
-    let verify_channel_id = guild_config.welcome_channel_id.as_ref()
-        .and_then(|s| s.parse::<u64>().ok())
-        .map(ChannelId::new);
-
-    let staff_channel_id = guild_config.staff_channel_id.as_ref()
-        .and_then(|s| s.parse::<u64>().ok())
-        .map(ChannelId::new);
-
-    let mut skipped_categories = std::collections::HashSet::new();
-    if let Some(v_id) = verify_channel_id {
-        if let Some(ch) = channels.get(&v_id) {
-            if let Some(parent) = ch.parent_id {
-                skipped_categories.insert(parent);
-            }
-        }
-    }
-    if let Some(s_id) = staff_channel_id {
-        if let Some(ch) = channels.get(&s_id) {
-            if let Some(parent) = ch.parent_id {
-                skipped_categories.insert(parent);
-            }
-        }
-    }
-
-    let target_channel = channels.values().find(|ch| {
-        let should_process = match ch.kind {
-            ChannelType::Category => {
-                !skipped_categories.contains(&ch.id)
-            }
-            ChannelType::Text | ChannelType::Voice => {
-                let is_verify = verify_channel_id.map_or(false, |id| ch.id == id);
-                let is_staff = staff_channel_id.map_or(false, |id| ch.id == id);
-
-                !(is_verify || is_staff)
-            }
-            _ => false,
-        };
-        should_process
-    });
-
-    let currently_locked = target_channel.map_or(false, |ch| {
-        ch.permission_overwrites.iter().any(|o| {
-            matches!(o.kind, PermissionOverwriteType::Role(rid) if rid == everyone_role_id)
-                && o.deny.contains(Permissions::VIEW_CHANNEL)
-        })
-    });
-
-    let mut count = 0u32;
-
-    for (_, mut channel) in channels {
-        let should_process = match channel.kind {
-            ChannelType::Category => {
-                !skipped_categories.contains(&channel.id)
-            }
-            ChannelType::Text | ChannelType::Voice => {
-                let is_verify = verify_channel_id.map_or(false, |id| channel.id == id);
-                let is_staff = staff_channel_id.map_or(false, |id| channel.id == id);
-
-                !(is_verify || is_staff)
-            }
-            _ => false,
-        };
-
-        if !should_process {
-            continue;
-        }
-
-        let mut overwrites = channel.permission_overwrites.clone();
-
-        if currently_locked {
-            
-            for o in &mut overwrites {
-                match o.kind {
-                    PermissionOverwriteType::Role(rid) if rid == everyone_role_id => {
-                        o.deny.remove(Permissions::VIEW_CHANNEL);
-                        o.allow |= Permissions::VIEW_CHANNEL;
-                    }
-                    PermissionOverwriteType::Role(rid) => {
-                        if member_role_id.map_or(false, |m| rid == m) {
-                            o.deny.remove(Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::CONNECT | Permissions::SPEAK);
-                            o.allow.remove(Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::CONNECT | Permissions::SPEAK);
-                        }
-                        if admin_role_id.map_or(false, |a| rid == a) {
-                            o.deny.remove(Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::CONNECT | Permissions::SPEAK | Permissions::MUTE_MEMBERS | Permissions::DEAFEN_MEMBERS | Permissions::MOVE_MEMBERS | Permissions::MANAGE_MESSAGES);
-                            o.allow.remove(Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::CONNECT | Permissions::SPEAK | Permissions::MUTE_MEMBERS | Permissions::DEAFEN_MEMBERS | Permissions::MOVE_MEMBERS | Permissions::MANAGE_MESSAGES);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        } else {
-            
-            let mut everyone_found = false;
-            let mut member_found = false;
-            let mut admin_found = false;
-
-            let member_allow = match channel.kind {
-                ChannelType::Voice => Permissions::VIEW_CHANNEL | Permissions::CONNECT | Permissions::SPEAK,
-                ChannelType::Text => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS,
-                _ => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::CONNECT | Permissions::SPEAK,
-            };
-
-            let admin_allow = match channel.kind {
-                ChannelType::Voice => Permissions::VIEW_CHANNEL | Permissions::CONNECT | Permissions::SPEAK | Permissions::MUTE_MEMBERS | Permissions::DEAFEN_MEMBERS | Permissions::MOVE_MEMBERS,
-                ChannelType::Text => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::MANAGE_MESSAGES,
-                _ => Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::MANAGE_MESSAGES | Permissions::CONNECT | Permissions::SPEAK | Permissions::MUTE_MEMBERS | Permissions::DEAFEN_MEMBERS | Permissions::MOVE_MEMBERS,
-            };
-
-            for o in &mut overwrites {
-                match o.kind {
-                    PermissionOverwriteType::Role(rid) if rid == everyone_role_id => {
-                        everyone_found = true;
-                        o.deny |= Permissions::VIEW_CHANNEL;
-                        o.allow.remove(Permissions::VIEW_CHANNEL);
-                    }
-                    PermissionOverwriteType::Role(rid) => {
-                        if member_role_id.map_or(false, |m| rid == m) {
-                            member_found = true;
-                            o.allow |= member_allow;
-                            o.deny.remove(member_allow);
-                        }
-                        if admin_role_id.map_or(false, |a| rid == a) {
-                            admin_found = true;
-                            o.allow |= admin_allow;
-                            o.deny.remove(admin_allow);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            if !everyone_found {
-                overwrites.push(PermissionOverwrite {
-                    kind: PermissionOverwriteType::Role(everyone_role_id),
-                    allow: Permissions::empty(),
-                    deny: Permissions::VIEW_CHANNEL,
-                });
-            }
-
-            if let Some(role_id) = member_role_id {
-                if !member_found {
-                    overwrites.push(PermissionOverwrite {
-                        kind: PermissionOverwriteType::Role(role_id),
-                        allow: member_allow,
-                        deny: Permissions::empty(),
-                    });
-                }
-            }
-
-            if let Some(role_id) = admin_role_id {
-                if !admin_found {
-                    overwrites.push(PermissionOverwrite {
-                        kind: PermissionOverwriteType::Role(role_id),
-                        allow: admin_allow,
-                        deny: Permissions::empty(),
-                    });
-                }
-            }
-        }
-
-        if let Err(e) = channel.edit(&ctx.http, EditChannel::new().permissions(overwrites)).await {
-            error!("Failed to edit channel/category {} permissions: {}", channel.id, e);
-        } else {
-            count += 1;
-        }
-    }
-
-    let embed = if currently_locked {
-        crate::theme::success("Lockdown Desativado", &format!("{} canais destrancados.", count))
-    } else {
-        crate::theme::success(
-            "Lockdown Ativado",
-            &format!("{} canais ajustados. Apenas membros verificados e admins podem acessar.", count),
-        )
-    };
-
-    component.edit_response(&ctx, EditInteractionResponse::new().embed(embed)).await?;
+    let enabled = crate::services::lockdown::apply(ctx, pool, guild_id, &guild_config, None).await?;
+    let embed = crate::theme::success("Lockdown", if enabled { "Lockdown ativado." } else { "Permissões originais restauradas." });
+    component.edit_response(ctx, EditInteractionResponse::new().embed(embed)).await?;
     Ok(())
 }

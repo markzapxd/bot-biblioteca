@@ -1,4 +1,5 @@
 pub mod anti_raid;
+pub mod lockdown;
 pub mod member_manager;
 pub mod ticket_manager;
 pub mod support_state;
