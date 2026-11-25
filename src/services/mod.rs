@@ -1,3 +1,4 @@
+pub mod caption;
 pub mod anti_raid;
 pub mod avatar_manager;
 pub mod history_manager;

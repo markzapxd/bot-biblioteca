@@ -2,6 +2,7 @@ pub mod addticket;
 pub mod admin;
 pub mod botstats;
 pub mod card;
+pub mod caption;
 pub mod claimticket;
 pub mod clearuser;
 pub mod closeticket;
@@ -39,6 +40,7 @@ pub async fn register_all(commands: &mut Vec<CreateCommand>) {
     admin::register(commands);
     botstats::register(commands);
     card::register(commands);
+    caption::register(commands);
     claimticket::register(commands);
     clearuser::register(commands);
     closeticket::register(commands);
@@ -68,6 +70,10 @@ pub async fn register_all(commands: &mut Vec<CreateCommand>) {
 }
 
 pub async fn route(ctx: &Context, interaction: &CommandInteraction, state: &BotState) -> Result<()> {
+    // Caption is stateless: bypass guild configuration/database initialization.
+    if interaction.data.name == "caption" {
+        return caption::handle(ctx, interaction).await;
+    }
     if let Some(guild_id) = interaction.guild_id {
         let guild_id_str = guild_id.to_string();
         if state.guild_cache.get(&guild_id_str).is_none() {
