@@ -125,11 +125,13 @@ pub async fn detect_message_violation(ctx: &Context, message: &Message, guild_co
 }
 
 pub async fn trigger_raid(ctx: &Context, guild: GuildId, reason: &str, guild_config: &Guild) -> Result<()> {
-    let generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let lock = crate::services::lockdown::operation(guild.get());
+    let guard = lock.lock().await;
     let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned().ok_or_else(|| BotError::Internal("No bot state".into()))?;
     // Persist ownership and perform effects before any logging await. Failed effects
     // remain pending and the lifecycle reconciler retries them through the same lock.
-    crate::services::lockdown::apply_action(ctx, &state.pool, guild, guild_config, crate::services::lockdown::Action::RaidStart(generation)).await?;
+    crate::services::lockdown::apply_action_locked(ctx, &state.pool, guild, guild_config, crate::services::lockdown::Action::RaidStart).await?;
+    drop(guard);
 
     let guild_name = if let Ok(guild_info) = guild.to_partial_guild(&ctx.http).await {
         guild_info.name.clone()
@@ -154,9 +156,11 @@ pub async fn trigger_raid(ctx: &Context, guild: GuildId, reason: &str, guild_con
 }
 
 pub async fn disable_raid_mode(ctx: &Context, guild_id: GuildId) -> Result<()> {
+    let lock = crate::services::lockdown::operation(guild_id.get());
+    let _guard = lock.lock().await;
     let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned().ok_or_else(|| BotError::Internal("No bot state".into()))?;
     let config = crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await?.ok_or_else(|| BotError::NotFound("Guild config".into()))?;
-    crate::services::lockdown::apply_action(ctx, &state.pool, guild_id, &config, crate::services::lockdown::Action::RaidDisable).await?;
+    crate::services::lockdown::apply_action_locked(ctx, &state.pool, guild_id, &config, crate::services::lockdown::Action::RaidDisable).await?;
 
     Ok(())
 }

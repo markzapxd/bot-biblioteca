@@ -102,7 +102,7 @@ struct Record {
 pub enum Action {
     Manual(bool),
     ToggleManual,
-    RaidStart(u64),
+    RaidStart,
     RaidEnd(u64),
     RaidDisable,
     Reconcile(i64),
@@ -110,7 +110,7 @@ pub enum Action {
 static OPERATIONS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<u64, std::sync::Weak<tokio::sync::Mutex<()>>>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-fn operation(guild: u64) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+pub(crate) fn operation(guild: u64) -> std::sync::Arc<tokio::sync::Mutex<()>> {
     let mut map = OPERATIONS.lock().unwrap();
     map.retain(|_, v| v.strong_count() > 0);
     if let Some(lock) = map.get(&guild).and_then(|v| v.upgrade()) {
@@ -203,16 +203,18 @@ impl Store {
                     record.manual = !record.manual;
                 }
             }
-            Action::RaidStart(generation) => {
-                if record.raid.map_or(true, |old| generation > old) {
-                    record.raid = Some(generation);
-                    record.expires = Some(chrono::Utc::now().timestamp() + 300);
-                }
+            Action::RaidStart => {
+                // The database sequence survives process restart and snapshot deletion.
+                let generation: i64 = sqlx::query_scalar("SELECT nextval('lockdown_generation')")
+                    .fetch_one(&self.pool)
+                    .await?;
+                record.raid = Some(generation as u64);
+                record.expires = Some(chrono::Utc::now().timestamp() + 300);
                 record.restoring = false;
             }
             Action::RaidDisable => record.raid = None,
             Action::Reconcile(now) => {
-                if record.expires.is_some_and(|expiry| expiry <= now) {
+                if record.expires.map_or(true, |expiry| expiry <= now) {
                     record.raid = None;
                 }
             }
@@ -262,6 +264,15 @@ pub async fn apply_action(
 ) -> Result<bool> {
     let lock = operation(guild.get());
     let _guard = lock.lock().await;
+    apply_action_locked(ctx, pool, guild, config, action).await
+}
+pub(crate) async fn apply_action_locked(
+    ctx: &Context,
+    pool: &sqlx::PgPool,
+    guild: GuildId,
+    config: &crate::models::Guild,
+    action: Action,
+) -> Result<bool> {
     let channels = guild.channels(&ctx.http).await?;
     let excluded: Vec<_> = [&config.welcome_channel_id, &config.staff_channel_id]
         .into_iter()

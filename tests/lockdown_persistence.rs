@@ -40,7 +40,7 @@ async fn ownership_restart_partial_retry_and_stale_timer() {
     let restarted = Store::new(pool.clone());
     let c = calls.clone();
     restarted
-        .change(1, Action::RaidStart(2), vec![], move |id, p| {
+        .change(1, Action::RaidStart, vec![], move |id, p| {
             let c = c.clone();
             async move {
                 c.lock().unwrap().push((id, p));
@@ -65,13 +65,13 @@ async fn ownership_restart_partial_retry_and_stale_timer() {
         .await
         .unwrap();
     restarted
-        .change(1, Action::RaidStart(3), vec![], |_, _| async {
+        .change(1, Action::RaidStart, vec![], |_, _| async {
             panic!("already applied")
         })
         .await
         .unwrap();
     restarted
-        .change(1, Action::RaidEnd(2), vec![], |_, _| async {
+        .change(1, Action::RaidEnd(u64::MAX), vec![], |_, _| async {
             panic!("old timer")
         })
         .await
@@ -79,7 +79,7 @@ async fn ownership_restart_partial_retry_and_stale_timer() {
     let restored = Arc::new(Mutex::new(Vec::new()));
     let r = restored.clone();
     restarted
-        .change(1, Action::RaidEnd(3), vec![], move |id, p| {
+        .change(1, Action::RaidDisable, vec![], move |id, p| {
             let r = r.clone();
             async move {
                 r.lock().unwrap().push((id, p));
@@ -136,4 +136,22 @@ async fn partial_restore_toggle_finishes_restore() {
         })
         .await
         .unwrap());
+}
+
+#[tokio::test]
+#[ignore = "requires TASK6_DATABASE_URL disposable postgres"]
+async fn legacy_raid_without_expiry_is_reconciled() {
+    let pool = sqlx::PgPool::connect(&std::env::var("TASK6_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    bibliotecaria::database::run_migrations(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO lockdown_snapshots(guild_id,channels) VALUES('992',$1) ON CONFLICT(guild_id) DO UPDATE SET channels=EXCLUDED.channels").bind(serde_json::json!({"manual":false,"raid":20,"channels":[]})).execute(&pool).await.unwrap();
+    let store = Store::new(pool);
+    assert!(!store
+        .change(992, Action::Reconcile(0), vec![], |_, _| async { Ok(()) })
+        .await
+        .unwrap());
+    assert!(!store.raid_active(992).await.unwrap());
 }
