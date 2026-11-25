@@ -5,3 +5,6 @@ node_modules/
 frontend/node_modules/
 frontend/.output/
 frontend/.nuxt/
+/docs/
+/.link-libs/
+/.omo/
