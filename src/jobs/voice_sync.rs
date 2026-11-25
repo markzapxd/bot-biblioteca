@@ -3,6 +3,62 @@ use chrono::Utc;
 use serenity::all::{Context, GuildId};
 use sqlx::PgPool;
 
+/// Client-owned background task. Re-entering startup cannot replace or duplicate
+/// the worker; dropping the client owner cancels it, including error exits.
+#[derive(Default)]
+pub struct VoiceWorker {
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl VoiceWorker {
+    pub fn start(&mut self, work: impl std::future::Future<Output = ()> + Send + 'static) {
+        if self.task.is_none() {
+            self.task = Some(tokio::spawn(work));
+        }
+    }
+}
+
+impl Drop for VoiceWorker {
+    fn drop(&mut self) {
+        if let Some(task) = &self.task { task.abort(); }
+    }
+}
+
+#[cfg(test)]
+mod worker_tests {
+    use super::VoiceWorker;
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+
+    #[tokio::test]
+    async fn repeated_startup_owns_one_worker_and_drop_cancels_it() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (cancelled, stopped) = tokio::sync::oneshot::channel();
+        struct CancelOnDrop(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for CancelOnDrop {
+            fn drop(&mut self) { let _ = self.0.take().unwrap().send(()); }
+        }
+        let mut owner = VoiceWorker::default();
+        let count = starts.clone();
+        owner.start(async move {
+            let _cancel = CancelOnDrop(Some(cancelled));
+            count.fetch_add(1, Ordering::SeqCst);
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        ready.await.unwrap();
+        let original = owner.task.as_ref().unwrap().id();
+        for _ in 0..3 {
+            let count = starts.clone();
+            owner.start(async move { count.fetch_add(1, Ordering::SeqCst); });
+        }
+        assert_eq!(owner.task.as_ref().unwrap().id(), original);
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        drop(owner);
+        stopped.await.unwrap();
+    }
+}
+
 pub static LIFECYCLE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Reconcile only a guild whose GUILD_CREATE/cache-ready snapshot is available.

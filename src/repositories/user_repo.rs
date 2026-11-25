@@ -48,30 +48,46 @@ pub async fn update_privacy(pool: &PgPool, user_id: &str, is_private: bool) -> R
 }
 
 pub async fn add_voice_time(pool: &PgPool, user_id: &str, duration_ms: i64) -> Result<()> {
-    sqlx::query("UPDATE users SET total_voice_time = total_voice_time + $2, last_seen = NOW(), updated_at = NOW() WHERE user_id = $1")
+    let mut tx = pool.begin().await?;
+    lock_voice_user(&mut tx, user_id).await?;
+    sqlx::query("UPDATE users SET total_voice_time = COALESCE(total_voice_time, 0) + $2, last_seen = NOW(), updated_at = NOW() WHERE user_id = $1")
         .bind(user_id)
         .bind(duration_ms)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn lock_voice_user(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, user_id: &str) -> Result<()> {
+    sqlx::query("INSERT INTO users(user_id) VALUES ($1) ON CONFLICT DO NOTHING")
+        .bind(user_id).execute(&mut **tx).await?;
+    sqlx::query("SELECT user_id FROM users WHERE user_id=$1 FOR UPDATE")
+        .bind(user_id).execute(&mut **tx).await?;
     Ok(())
 }
 
 pub async fn recompute_voice_time(pool: &PgPool, user_id: &str) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    // Separate statements are essential at READ COMMITTED: SUM must get its
+    // snapshot after any transition holding the user row has committed.
+    lock_voice_user(&mut tx, user_id).await?;
     sqlx::query(
         "UPDATE users u SET total_voice_time = COALESCE((SELECT SUM(vs.duration) FROM voice_sessions vs WHERE vs.user_id = u.user_id), 0), last_seen = NOW(), updated_at = NOW() WHERE u.user_id = $1"
     )
         .bind(user_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(())
 }
 
 pub async fn recompute_all_voice_times(pool: &PgPool) -> Result<()> {
-    sqlx::query(
-        "UPDATE users u SET total_voice_time = COALESCE((SELECT SUM(vs.duration) FROM voice_sessions vs WHERE vs.user_id = u.user_id), 0), updated_at = NOW()"
-    )
-        .execute(pool)
-        .await?;
+    let users = sqlx::query_scalar::<_, String>("SELECT user_id FROM users ORDER BY user_id")
+        .fetch_all(pool).await?;
+    for user in users {
+        recompute_voice_time(pool, &user).await?;
+    }
     Ok(())
 }
 

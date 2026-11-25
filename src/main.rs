@@ -198,7 +198,8 @@ async fn main() {
     // Exactly one worker belongs to this client lifecycle, never to READY.
     let worker_pool = pool.clone();
     let worker_cache = client.cache.clone();
-    let worker = tokio::spawn(async move {
+    let mut worker = jobs::voice_sync::VoiceWorker::default();
+    worker.start(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
@@ -224,7 +225,7 @@ async fn main() {
         }
     });
     let result = client.start().await;
-    worker.abort();
+    drop(worker);
     if let Err(e) = result {
         tracing::error!("Client error: {}", e);
         std::process::exit(1);

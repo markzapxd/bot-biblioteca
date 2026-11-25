@@ -55,6 +55,41 @@ async fn cache_guild_initialization_is_repeatable_and_scoped() {
     assert!(voice::find_active_by_user_guild(&pool,&user,"993").await.unwrap().is_none());
 }
 
+#[tokio::test]
+#[ignore = "requires explicit disposable PostgreSQL"]
+async fn blocked_recompute_reads_sum_after_transition_commits() {
+    let pool = pool().await;
+    for all in [false, true] {
+        let user = uuid::Uuid::new_v4().to_string();
+        voice::transition(&pool,&user,"g",None,Some(("c","c")),Utc::now()).await.unwrap();
+        // Hold precisely the user-row lock acquired by transition before closing.
+        let mut leave = pool.begin().await.unwrap();
+        let holder: i32 = sqlx::query_scalar("SELECT pg_backend_pid()").fetch_one(&mut *leave).await.unwrap();
+        sqlx::query("SELECT user_id FROM users WHERE user_id=$1 FOR UPDATE").bind(&user).execute(&mut *leave).await.unwrap();
+        sqlx::query("UPDATE voice_sessions SET active=FALSE, duration=424242, left_at=NOW() WHERE user_id=$1").bind(&user).execute(&mut *leave).await.unwrap();
+        sqlx::query("UPDATE users SET total_voice_time=424242 WHERE user_id=$1").bind(&user).execute(&mut *leave).await.unwrap();
+        let worker_pool = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect_with(pool.connect_options().as_ref().clone()).await.unwrap();
+        let worker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()").fetch_one(&worker_pool).await.unwrap();
+        let p = worker_pool.clone(); let u = user.clone();
+        let worker = tokio::spawn(async move {
+            if all { user_repo::recompute_all_voice_times(&p).await.unwrap(); }
+            else { user_repo::recompute_voice_time(&p,&u).await.unwrap(); }
+        });
+        // Observe the actual PostgreSQL wait edge, not timing guesses.
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let blocked: bool = sqlx::query_scalar("SELECT $1 = ANY(pg_blocking_pids($2))").bind(holder).bind(worker_pid).fetch_one(&pool).await.unwrap();
+                if blocked { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.expect("worker must wait on transition's lock");
+        leave.commit().await.unwrap();
+        worker.await.unwrap();
+        assert_eq!(user_repo::find_by_id(&pool,&user).await.unwrap().unwrap().total_voice_time,Some(424242),"all={all}: worker must not overwrite committed aggregate with pre-lock snapshot");
+        worker_pool.close().await;
+    }
+}
+
 // Explicit isolated URL only; never falls back to DATABASE_URL or loads dotenv.
 async fn pool() -> PgPool {
     let url = std::env::var("TASK4_TEST_DATABASE_URL").expect("explicit disposable DB required");
