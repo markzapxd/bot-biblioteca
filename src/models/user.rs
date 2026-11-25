@@ -30,6 +30,8 @@ pub struct AvatarEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NicknameEntry {
+    #[serde(default)]
+    pub guild_id: Option<String>,
     pub name: String,
     pub date: DateTime<Utc>,
 }

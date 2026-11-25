@@ -2,6 +2,22 @@ use crate::errors::Result;
 use crate::models::User;
 use sqlx::PgPool;
 
+#[derive(Clone, Copy)]
+pub enum HistoryKind { Username, Avatar, Nickname }
+
+/// Atomic row-locked append. Deduplicate adjacent equal values (per guild for
+/// nicknames), ignoring timestamps, then keep the latest 500 appended entries.
+pub async fn append_history(pool: &PgPool, user_id: &str, kind: HistoryKind, entry: serde_json::Value) -> Result<()> {
+    let (column, key) = match kind {
+        HistoryKind::Username => ("username_history", "name"),
+        HistoryKind::Avatar => ("avatar_history", "url"),
+        HistoryKind::Nickname => ("nickname_history", "name"),
+    };
+    let sql = format!("INSERT INTO users(user_id, {column}) VALUES ($1, jsonb_build_array($2::jsonb)) ON CONFLICT(user_id) DO UPDATE SET {column} = (SELECT COALESCE(jsonb_agg(value ORDER BY ord), '[]'::jsonb) FROM jsonb_array_elements(COALESCE(users.{column}, '[]'::jsonb) || jsonb_build_array($2::jsonb)) WITH ORDINALITY e(value,ord) WHERE ord > jsonb_array_length(COALESCE(users.{column}, '[]'::jsonb)) + 1 - 500), updated_at=NOW() WHERE (SELECT value->>$3 FROM jsonb_array_elements(COALESCE(users.{column}, '[]'::jsonb)) WITH ORDINALITY e(value,ord) WHERE ($4::bool = FALSE OR value->>'guild_id' IS NOT DISTINCT FROM $2::jsonb->>'guild_id') ORDER BY ord DESC LIMIT 1) IS DISTINCT FROM $2::jsonb->>$3");
+    sqlx::query(&sql).bind(user_id).bind(entry).bind(key).bind(matches!(kind, HistoryKind::Nickname)).execute(pool).await?;
+    Ok(())
+}
+
 pub async fn find_by_id(pool: &PgPool, user_id: &str) -> Result<Option<User>> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE user_id = $1")
         .bind(user_id)
