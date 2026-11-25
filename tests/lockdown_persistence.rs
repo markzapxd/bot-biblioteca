@@ -460,3 +460,111 @@ async fn stored_private_avatar_is_scoped_in_both_production_renderers() {
         }
     }
 }
+
+#[tokio::test]
+#[ignore = "requires TASK6_DATABASE_URL disposable postgres"]
+async fn partial_restore_reactivation_relocks_restored_channels_after_restart() {
+    let pool = sqlx::PgPool::connect(&std::env::var("TASK6_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    bibliotecaria::database::run_migrations(&pool)
+        .await
+        .unwrap();
+    for (guild, raid, restart) in [
+        (83001, true, false),
+        (83002, false, false),
+        (83003, true, true),
+        (83004, false, true),
+    ] {
+        let locked = vec![PermissionOverwrite {
+            kind: PermissionOverwriteType::Role(RoleId::new(1)),
+            allow: Permissions::empty(),
+            deny: Permissions::SEND_MESSAGES,
+        }];
+        let state = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let store = Store::new(pool.clone());
+        let current = state.clone();
+        store
+            .change(
+                guild,
+                Action::Manual(true),
+                vec![
+                    ChannelSnapshot::new(1, vec![], locked.clone()),
+                    ChannelSnapshot::new(2, vec![], locked.clone()),
+                ],
+                move |id, p| {
+                    current.lock().unwrap().insert(id, p);
+                    async { Ok(()) }
+                },
+            )
+            .await
+            .unwrap();
+        let current = state.clone();
+        assert!(store
+            .change(guild, Action::Manual(false), vec![], move |id, p| {
+                let current = current.clone();
+                async move {
+                    if id == 2 {
+                        Err(BotError::Internal("transient restore".into()))
+                    } else {
+                        current.lock().unwrap().insert(id, p);
+                        Ok(())
+                    }
+                }
+            })
+            .await
+            .is_err());
+        assert!(state.lock().unwrap()[&1].is_empty());
+        let store = if restart {
+            Store::new(pool.clone())
+        } else {
+            store
+        };
+        let current = state.clone();
+        store
+            .change(
+                guild,
+                if raid {
+                    Action::RaidStart
+                } else {
+                    Action::Manual(true)
+                },
+                vec![],
+                move |id, p| {
+                    current.lock().unwrap().insert(id, p);
+                    async { Ok(()) }
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            state.lock().unwrap()[&1],
+            locked,
+            "restored channel A must be relocked"
+        );
+        assert_eq!(
+            state.lock().unwrap()[&2],
+            locked,
+            "pending channel B must remain locked"
+        );
+        // A second unlock must restore both original snapshots, not skip A's old progress.
+        let current = state.clone();
+        store
+            .change(
+                guild,
+                if raid {
+                    Action::RaidDisable
+                } else {
+                    Action::Manual(false)
+                },
+                vec![],
+                move |id, p| {
+                    current.lock().unwrap().insert(id, p);
+                    async { Ok(()) }
+                },
+            )
+            .await
+            .unwrap();
+        assert!(state.lock().unwrap().values().all(Vec::is_empty));
+    }
+}

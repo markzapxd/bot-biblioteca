@@ -74,6 +74,8 @@ pub struct ChannelSnapshot {
     original: Vec<PermissionOverwrite>,
     locked: Vec<PermissionOverwrite>,
     applied: bool,
+    #[serde(default)]
+    restored: bool,
 }
 impl ChannelSnapshot {
     pub fn new(
@@ -86,6 +88,7 @@ impl ChannelSnapshot {
             original,
             locked,
             applied: false,
+            restored: false,
         }
     }
 }
@@ -242,7 +245,7 @@ impl Store {
         let mut failure = None;
         let mut i = 0;
         while i < record.channels.len() {
-            if active && record.channels[i].applied {
+            if (active && record.channels[i].applied) || (!active && record.channels[i].restored) {
                 i += 1;
                 continue;
             }
@@ -259,10 +262,14 @@ impl Store {
             match result {
                 Ok(()) if active => {
                     record.channels[i].applied = true;
+                    record.channels[i].restored = false;
                     i += 1;
                 }
                 Ok(()) => {
-                    record.channels.remove(i);
+                    // Retain originals for a new activation during partial restore.
+                    record.channels[i].applied = false;
+                    record.channels[i].restored = true;
+                    i += 1;
                 }
                 Err(error) if unknown_channel(&error) => {
                     record.channels.remove(i);
