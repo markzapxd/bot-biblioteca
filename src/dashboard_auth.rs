@@ -124,11 +124,18 @@ pub fn protect(private: Router, auth: Option<DashboardAuth>) -> Router {
     ));
     Router::new()
         .route("/", get(index))
-        .route("/login", get(login_page).post(login))
-        .route("/logout", post(logout))
+        .route(
+            "/login",
+            get(login_page)
+                .post(login)
+                .layer(axum::extract::DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/logout",
+            post(logout).layer(axum::extract::DefaultBodyLimit::max(8192)),
+        )
         .with_state(auth.clone())
         .merge(private)
-        .layer(axum::extract::DefaultBodyLimit::max(8192))
         .layer(axum::middleware::from_fn_with_state(auth, network_gate))
 }
 async fn network_gate(
@@ -194,12 +201,18 @@ async fn session_gate(
         None => StatusCode::UNAUTHORIZED.into_response(),
     }
 }
-async fn login_page(State(auth): State<Option<DashboardAuth>>) -> Response {
+async fn login_page(State(auth): State<Option<DashboardAuth>>, req: Request) -> Response {
     let auth = auth.unwrap();
     let id = token();
     let csrf = token();
     let mut r = auth.records.lock().unwrap();
     prune(&mut r);
+    if cookie(&req)
+        .and_then(|id| r.sessions.get(&id))
+        .is_some_and(|s| s.authenticated)
+    {
+        return (StatusCode::SEE_OTHER, [(header::LOCATION, "/")]).into_response();
+    }
     if r.sessions.len() >= LIMIT {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     }
@@ -385,6 +398,128 @@ mod tests {
             .unwrap()
             .to_owned()
     }
+    #[tokio::test]
+    async fn api_body_limit_and_authenticated_login_are_preserved() {
+        let auth = DashboardAuth::new("admin", "test-password-only", true);
+        auth.records.lock().unwrap().sessions.insert(
+            "active".into(),
+            Session {
+                expires: Instant::now() + TTL,
+                csrf: "csrf".into(),
+                authenticated: true,
+            },
+        );
+        let private = Router::new().route(
+            "/api/message",
+            post(
+                |axum::Json(value): axum::Json<serde_json::Value>| async move {
+                    assert_eq!(value["content"].as_str().unwrap().len(), 2000);
+                    StatusCode::OK
+                },
+            ),
+        );
+        let app = protect(private, Some(auth.clone()));
+        let body = format!("{{\"content\":\"{}\"}}", "\\u0061".repeat(2000));
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/message")
+            .header("content-type", "application/json")
+            .header("cookie", "dashboard_session=active")
+            .header("x-csrf-token", "csrf")
+            .body(Body::from(body))
+            .unwrap();
+        req.extensions_mut()
+            .insert(ConnectInfo("10.0.0.1:1".parse::<SocketAddr>().unwrap()));
+        assert_eq!(
+            app.clone().oneshot(req).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let response = call(
+            &app,
+            "10.0.0.1:1",
+            "GET",
+            "/login",
+            "dashboard_session=active",
+            "",
+            "",
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert!(!response.headers().contains_key(header::SET_COOKIE));
+        assert_eq!(auth.records.lock().unwrap().sessions.len(), 1);
+        for path in ["/login", "/logout"] {
+            assert_eq!(
+                call(&app, "10.0.0.1:1", "POST", path, "", &"a".repeat(9000), "")
+                    .await
+                    .status(),
+                StatusCode::PAYLOAD_TOO_LARGE
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_throttle_window_and_pruning() {
+        let auth = DashboardAuth::new("admin", "test-password-only", true);
+        let app = app(auth.clone());
+        for attempt in 1..=11 {
+            let status = call(
+                &app,
+                "10.0.0.1:1",
+                "POST",
+                "/login",
+                "",
+                "username=a&password=b&csrf=c",
+                "",
+            )
+            .await
+            .status();
+            assert_eq!(
+                status,
+                if attempt <= 10 {
+                    StatusCode::FORBIDDEN
+                } else {
+                    StatusCode::TOO_MANY_REQUESTS
+                }
+            );
+        }
+        {
+            let mut records = auth.records.lock().unwrap();
+            records
+                .attempts
+                .get_mut(&"10.0.0.1".parse().unwrap())
+                .unwrap()
+                .0 = Instant::now() - WINDOW;
+            records.sessions.insert(
+                "stale".into(),
+                Session {
+                    expires: Instant::now() - Duration::from_secs(1),
+                    csrf: token(),
+                    authenticated: false,
+                },
+            );
+        }
+        assert_eq!(
+            call(
+                &app,
+                "10.0.0.1:1",
+                "POST",
+                "/login",
+                "",
+                "username=a&password=b&csrf=c",
+                ""
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        let records = auth.records.lock().unwrap();
+        assert!(!records.sessions.contains_key("stale"));
+        assert_eq!(
+            records.attempts[&"10.0.0.1".parse::<IpAddr>().unwrap()].1,
+            1
+        );
+    }
+
     #[test]
     fn ip_policy() {
         for ip in [
@@ -464,6 +599,29 @@ mod tests {
         assert_eq!(login.status(), StatusCode::SEE_OTHER);
         let active = session_cookie(&login);
         assert_ne!(active, cookie);
+        let remaining = auth.records.lock().unwrap().sessions
+            [active.strip_prefix("dashboard_session=").unwrap()]
+        .expires
+        .duration_since(Instant::now());
+        assert!(
+            remaining <= Duration::from_secs(8 * 3600)
+                && remaining > Duration::from_secs(8 * 3600 - 5)
+        );
+        assert_eq!(
+            call(
+                &app,
+                peer,
+                "POST",
+                "/login",
+                &cookie,
+                &format!("username=admin&password=test-password-only&csrf={nonce}"),
+                ""
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+
         assert_eq!(
             call(&app, peer, "GET", "/private", &active, "", "")
                 .await
