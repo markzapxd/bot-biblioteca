@@ -22,7 +22,7 @@ async fn migration_deduplicates_once_and_preserves_legacy_history() {
     let user = user_repo::find_by_id(&isolated,"legacy").await.unwrap().unwrap();
     assert_eq!(user.username_history.as_array().unwrap().len(),600);
     assert_eq!(user.total_voice_time,Some(123));
-    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT COUNT(*) FROM bot_schema_migrations").fetch_one(&isolated).await.unwrap(),3);
+    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT COUNT(*) FROM bot_schema_migrations").fetch_one(&isolated).await.unwrap(),4);
     isolated.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE")).execute(&pool).await.unwrap();
 }

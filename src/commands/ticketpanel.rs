@@ -21,6 +21,8 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         .ok_or_else(|| crate::errors::BotError::NotFound("Guild config not found".into()))?;
     permissions::require_admin(user_id, member, &guild_config)?;
 
+    interaction.defer_ephemeral(&ctx.http).await?;
     ticket_manager::send_ticket_panel(ctx, interaction.channel_id).await?;
+    interaction.edit_response(&ctx.http, EditInteractionResponse::new().content("Painel publicado.")).await?;
     Ok(())
 }

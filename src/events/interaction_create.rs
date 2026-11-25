@@ -104,9 +104,8 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
 
             let protected = custom_id.starts_with("modules_") || custom_id.starts_with("logs_")
                 || custom_id.starts_with("cfg_") || custom_id.starts_with("card_")
-                || custom_id.starts_with("lockdown_") || custom_id == "raidmode_toggle"
-                || custom_id.starts_with("approve_") || custom_id.starts_with("reject_")
-                || custom_id.starts_with("ticket_close");
+                || custom_id.starts_with("lockdown_") || custom_id == "raidmode_toggle";
+            // Ticket and verification callbacks enforce their resource-scoped policies in services.
             let authorization = async { if custom_id.starts_with("owner_") {
                 crate::permissions::require_owner(component.user.id.get()).is_ok()
             } else if protected {
@@ -214,6 +213,9 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 }
                 _ if custom_id == "ticket_close" => {
                     crate::services::ticket_manager::handle_ticket_close_request(&ctx, &component).await
+                }
+                _ if custom_id == "ticket_close_cancel" => {
+                    crate::services::ticket_manager::handle_ticket_close_cancel(&ctx, &component).await
                 }
                 _ if custom_id == "ticket_close_confirm" => {
                     crate::services::ticket_manager::handle_ticket_close_confirm(&ctx, &component).await
@@ -326,6 +328,9 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
 
             if let Err(e) = result {
                 tracing::error!("Error handling component interaction {}: {:?}", custom_id, e);
+                if custom_id.starts_with("ticket_") || custom_id.starts_with("approve_") || custom_id.starts_with("reject_") {
+                    let _ = component.edit_response(&ctx.http, serenity::all::EditInteractionResponse::new().content("Não foi possível concluir a ação. Acesso negado ou operação indisponível.")).await;
+                }
                 if matches!(e, crate::errors::BotError::Unauthorized(_)) && component.get_response(&ctx.http).await.is_err() {
                     let _ = component.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
                         serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)

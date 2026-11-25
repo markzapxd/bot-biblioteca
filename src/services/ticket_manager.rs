@@ -1,14 +1,11 @@
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
+use super::support_state::{self, Key};
 use serenity::all::*;
-use tracing::error;
 
 use crate::errors::Result;
 use crate::models::Guild;
 use crate::theme;
 
-static OPEN_TICKETS: LazyLock<tokio::sync::Mutex<HashMap<u64, u64>>> = LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
 
 pub async fn send_ticket_panel(ctx: &Context, channel_id: ChannelId) -> Result<()> {
     let embed = CreateEmbed::new()
@@ -33,18 +30,6 @@ pub async fn send_ticket_panel(ctx: &Context, channel_id: ChannelId) -> Result<(
 pub async fn handle_ticket_open(ctx: &Context, interaction: &ComponentInteraction, guild_config: &Guild) -> Result<()> {
     let user_id = interaction.user.id.get();
 
-    {
-        let tickets = OPEN_TICKETS.lock().await;
-        if tickets.contains_key(&user_id) {
-            interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-                CreateInteractionResponseMessage::new()
-                    .content("Você já possui um ticket aberto.")
-                    .ephemeral(true)
-            )).await?;
-            return Ok(());
-        }
-    }
-
     let guild_id = match interaction.guild_id {
         Some(gid) => gid,
         None => {
@@ -56,6 +41,14 @@ pub async fn handle_ticket_open(ctx: &Context, interaction: &ComponentInteractio
             return Ok(());
         }
     };
+    interaction.defer_ephemeral(&ctx.http).await?;
+    guild_id.member(&ctx.http, interaction.user.id).await?;
+    let store = support_state::store(ctx).await?;
+    let key = Key::new(guild_id.get(), user_id);
+    if !store.reserve_ticket(key).await? {
+        interaction.edit_response(&ctx.http, EditInteractionResponse::new().content("Você já possui um ticket aberto ou em criação.")).await?;
+        return Ok(());
+    }
     let username = interaction.user.name.clone();
     let channel_name = format!("ticket-{}", username.to_lowercase().replace(' ', "-"));
 
@@ -96,12 +89,15 @@ pub async fn handle_ticket_open(ctx: &Context, interaction: &ComponentInteractio
         .kind(ChannelType::Text)
         .permissions(overwrites);
 
-    let channel = guild_id.create_channel(&ctx.http, builder).await?;
-
-    {
-        let mut tickets = OPEN_TICKETS.lock().await;
-        tickets.insert(user_id, channel.id.get());
-    }
+    let channel = match guild_id.create_channel(&ctx.http, builder).await {
+        Ok(channel) => channel,
+        Err(error) => {
+            store.release_ticket(key).await?;
+            interaction.edit_response(&ctx.http, EditInteractionResponse::new().content("Falha ao criar ticket. Tente novamente.")).await?;
+            return Err(error.into());
+        }
+    };
+    store.attach_ticket(key, channel.id.get()).await?;
 
     let embed = CreateEmbed::new()
         .title("Ticket Aberto")
@@ -120,99 +116,75 @@ pub async fn handle_ticket_open(ctx: &Context, interaction: &ComponentInteractio
     }
     channel.send_message(&ctx.http, msg).await?;
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new()
-            .content(format!("Ticket criado: <#{}>", channel.id.get()))
-            .ephemeral(true)
-    )).await?;
+    interaction.edit_response(&ctx.http, EditInteractionResponse::new()
+        .content(format!("Ticket criado: <#{}>", channel.id.get()))).await?;
 
     Ok(())
 }
 
-pub async fn handle_ticket_close_request(ctx: &Context, interaction: &ComponentInteraction) -> Result<()> {
-    let embed = CreateEmbed::new()
-        .title("Fechar Ticket")
-        .description("Tem certeza que deseja fechar este ticket?")
-        .colour(Colour::new(0x2B2D31));
-    let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "ticket", embed).await;
-
-    let confirm_btn = CreateButton::new("ticket_close_confirm")
-        .label("Sim, Fechar")
-        .style(ButtonStyle::Secondary);
-    let cancel_btn = CreateButton::new("ticket_close_cancel")
-        .label("Cancelar")
-        .style(ButtonStyle::Secondary);
-    let row = CreateActionRow::Buttons(vec![confirm_btn, cancel_btn]);
-
-    let mut msg = CreateInteractionResponseMessage::new()
-        .embed(embed)
-        .components(vec![row])
-        .ephemeral(true);
-    if let Some(file) = attachment {
-        msg = msg.add_file(file);
+async fn close_policy(ctx: &Context, guild: GuildId, channel: ChannelId, user: UserId) -> Result<bool> {
+    let store = support_state::store(ctx).await?;
+    let owner = store.ticket_owner(guild.get(), channel.get()).await?
+        .ok_or_else(|| crate::errors::BotError::Unauthorized("Canal não é um ticket registrado".into()))?;
+    let config = {
+        let data = ctx.data.read().await;
+        let state = data.get::<crate::state::BotStateKey>().ok_or_else(|| crate::errors::BotError::Internal("State unavailable".into()))?;
+        crate::repositories::guild_repo::find_by_id(&state.pool, &guild.to_string()).await?
+            .ok_or_else(|| crate::errors::BotError::Unauthorized("Configuração ausente".into()))?
+    };
+    let staff = support_state::staff(ctx, guild, user, &config).await?;
+    if owner.user != user.get() && !staff {
+        return Err(crate::errors::BotError::Unauthorized("Apenas dono ou staff".into()));
     }
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(msg)).await?;
+    Ok(staff)
+}
 
+pub async fn handle_ticket_close_request(ctx: &Context, interaction: &ComponentInteraction) -> Result<()> {
+    interaction.defer_ephemeral(&ctx.http).await?;
+    let guild = interaction.guild_id.ok_or_else(|| crate::errors::BotError::Unauthorized("Guild only".into()))?;
+    close_policy(ctx, guild, interaction.channel_id, interaction.user.id).await?;
+    interaction.edit_response(&ctx.http, EditInteractionResponse::new().content("Tem certeza que deseja fechar este ticket?")
+        .components(vec![CreateActionRow::Buttons(vec![
+            CreateButton::new("ticket_close_confirm").label("Sim, Fechar").style(ButtonStyle::Danger),
+            CreateButton::new("ticket_close_cancel").label("Cancelar").style(ButtonStyle::Secondary),
+        ])])).await?;
+    Ok(())
+}
+
+pub async fn handle_ticket_close_cancel(ctx: &Context, interaction: &ComponentInteraction) -> Result<()> {
+    interaction.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
+        CreateInteractionResponseMessage::new().content("Fechamento cancelado.").components(vec![]))).await?;
     Ok(())
 }
 
 pub async fn handle_ticket_close_confirm(ctx: &Context, interaction: &ComponentInteraction) -> Result<()> {
-    let channel_id = interaction.channel_id;
-    let user_id = interaction.user.id.get();
-
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new()
-            .content("O ticket será fechado em 5 segundos...")
-            .ephemeral(true)
-    )).await?;
-
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
-    {
-        let mut tickets = OPEN_TICKETS.lock().await;
-        tickets.remove(&user_id);
-    }
-
-    if let Err(e) = channel_id.delete(&ctx.http).await {
-        error!("Failed to delete ticket channel {}: {}", channel_id, e);
-    }
-
+    interaction.defer_ephemeral(&ctx.http).await?;
+    let guild = interaction.guild_id.ok_or_else(|| crate::errors::BotError::Unauthorized("Guild only".into()))?;
+    let staff = close_policy(ctx, guild, interaction.channel_id, interaction.user.id).await?;
+    let store = support_state::store(ctx).await?;
+    let result = store.close_ticket(guild.get(), interaction.channel_id.get(), interaction.user.id.get(), staff,
+        || async { interaction.channel_id.delete(&ctx.http).await?; Ok(()) }).await;
+    let text = match &result { Ok(true) => "Ticket fechado.", Ok(false) => "Ticket não encontrado.", Err(_) => "Falha ao excluir ticket. Tente novamente." };
+    interaction.edit_response(&ctx.http, EditInteractionResponse::new().content(text).components(vec![])).await?;
+    result?;
     Ok(())
 }
 
 pub async fn handle_close_ticket_command(ctx: &Context, interaction: &CommandInteraction, target_user_id: UserId) -> Result<()> {
-    let channel_id = {
-        let tickets = OPEN_TICKETS.lock().await;
-        tickets.get(&target_user_id.get()).copied()
+    interaction.defer_ephemeral(&ctx.http).await?;
+    let guild = interaction.guild_id.ok_or_else(|| crate::errors::BotError::Unauthorized("Guild only".into()))?;
+    let store = support_state::store(ctx).await?;
+    let Some(channel) = store.ticket_channel(Key::new(guild.get(), target_user_id.get())).await? else {
+        interaction.edit_response(&ctx.http, EditInteractionResponse::new().content("Ticket não encontrado.")).await?;
+        return Ok(());
     };
-
-    match channel_id {
-        Some(cid) => {
-            if let Err(e) = ChannelId::new(cid).delete(&ctx.http).await {
-                error!("Failed to delete ticket channel {}: {}", cid, e);
-            }
-            {
-                let mut tickets = OPEN_TICKETS.lock().await;
-                tickets.remove(&target_user_id.get());
-            }
-            let embed = theme::success("Ticket Fechado", &format!("Ticket de <@{}> foi fechado.", target_user_id.get()));
-            let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "closeticket", embed).await;
-            let mut msg = CreateInteractionResponseMessage::new().embed(embed);
-            if let Some(file) = attachment {
-                msg = msg.add_file(file);
-            }
-            interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
-        }
-        None => {
-            let embed = theme::info("Ticket", &format!("<@{}> nao possui ticket aberto.", target_user_id.get()));
-            let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "ticket", embed).await;
-            let mut msg = CreateInteractionResponseMessage::new().embed(embed).ephemeral(true);
-            if let Some(file) = attachment {
-                msg = msg.add_file(file);
-            }
-            interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
-        }
-    }
+    let channel = ChannelId::new(channel);
+    let staff = close_policy(ctx, guild, channel, interaction.user.id).await?;
+    let result = store.close_ticket(guild.get(), channel.get(), interaction.user.id.get(), staff,
+        || async { channel.delete(&ctx.http).await?; Ok(()) }).await;
+    let text = match &result { Ok(true) => "Ticket fechado.", Ok(false) => "Ticket não encontrado.", Err(_) => "Falha ao excluir ticket. Tente novamente." };
+    interaction.edit_response(&ctx.http, EditInteractionResponse::new().content(text)).await?;
+    result?;
     Ok(())
 }
 

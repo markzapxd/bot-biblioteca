@@ -1,13 +1,9 @@
-use std::collections::HashSet;
-use std::sync::LazyLock;
+use super::support_state::{self, Key};
 
 use serenity::all::*;
-use tracing::error;
 
 use crate::errors::Result;
 use crate::models::Guild;
-
-static PENDING_REQUESTS: LazyLock<tokio::sync::Mutex<HashSet<u64>>> = LazyLock::new(|| tokio::sync::Mutex::new(HashSet::new()));
 
 pub async fn handle_access_request(ctx: &Context, interaction: &ComponentInteraction, guild_config: &Guild) -> Result<()> {
     let user_id = interaction.user.id.get();
@@ -27,18 +23,6 @@ pub async fn handle_access_request(ctx: &Context, interaction: &ComponentInterac
         }
     }
 
-    {
-        let pending = PENDING_REQUESTS.lock().await;
-        if pending.contains(&user_id) {
-            interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-                CreateInteractionResponseMessage::new()
-                    .content("Você já possui uma solicitação de acesso pendente.")
-                    .ephemeral(true)
-            )).await?;
-            return Ok(());
-        }
-    }
-
     let input = CreateInputText::new(InputTextStyle::Short, "Quem te chamou para o servidor?", "referral_input")
         .placeholder("Digite o nome ou apelido da pessoa")
         .max_length(100);
@@ -54,18 +38,15 @@ pub async fn handle_access_request(ctx: &Context, interaction: &ComponentInterac
 pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInteraction, guild_config: &Guild) -> Result<()> {
     let user_id = modal_submit.user.id.get();
 
-    {
-        let pending = PENDING_REQUESTS.lock().await;
-        if pending.contains(&user_id) {
-            modal_submit.create_response(&ctx.http, CreateInteractionResponse::Message(
-                CreateInteractionResponseMessage::new()
-                    .content("Você já possui uma solicitação de acesso pendente.")
-                    .ephemeral(true)
-            )).await?;
-            return Ok(());
-        }
+    modal_submit.defer_ephemeral(&ctx.http).await?;
+    let guild = modal_submit.guild_id.ok_or_else(|| crate::errors::BotError::Validation("Guild only".into()))?;
+    let member = guild.member(&ctx.http, modal_submit.user.id).await?;
+    let role: u64 = guild_config.member_role_id.as_ref().and_then(|v| v.parse().ok())
+        .ok_or_else(|| crate::errors::BotError::Validation("Cargo de membro não configurado".into()))?;
+    if member.roles.contains(&RoleId::new(role)) {
+        modal_submit.edit_response(&ctx.http, EditInteractionResponse::new().content("Você já possui acesso.")).await?;
+        return Ok(());
     }
-
     let referral_text = modal_submit.data.components.first()
         .and_then(|row| row.components.first())
         .and_then(|comp| {
@@ -100,123 +81,68 @@ pub async fn handle_referral_modal_submit(ctx: &Context, modal_submit: &ModalInt
     let channel_id: u64 = staff_channel_id.parse()
         .map_err(|_| crate::errors::BotError::Validation("Canal de staff configurado e invalido.".into()))?;
 
-    ChannelId::new(channel_id)
-        .send_message(&ctx.http, CreateMessage::new().embed(embed).components(vec![row]))
-        .await
-        .map_err(|e| {
-            error!("Falha ao enviar solicitacão de acesso para o canal {}: {:?}", channel_id, e);
-            crate::errors::BotError::Internal("Não foi possivel enviar a solicitacão.".into())
-        })?;
-
-    // Só marca como pendente DEPOIS de ter enviado com sucesso
-    {
-        let mut pending = PENDING_REQUESTS.lock().await;
-        pending.insert(user_id);
+    // Validate the configured destination belongs to the current guild before reserving.
+    let destination = ChannelId::new(channel_id).to_channel(&ctx.http).await?;
+    if destination.guild().map(|c| c.guild_id) != Some(guild) {
+        return Err(crate::errors::BotError::Validation("Canal de outra guild".into()));
     }
-
-    modal_submit.create_response(&ctx.http, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new()
-            .content("Sua solicitacão foi enviada para aprovacão.")
-            .ephemeral(true)
-    )).await?;
+    let store = support_state::store(ctx).await?;
+    let key = Key::new(guild.get(), user_id);
+    if !store.reserve_request(key).await? {
+        modal_submit.edit_response(&ctx.http, EditInteractionResponse::new().content("Você já possui uma solicitação pendente (24h).")).await?;
+        return Ok(());
+    }
+    let sent = match ChannelId::new(channel_id).send_message(&ctx.http, CreateMessage::new().embed(embed).components(vec![row])).await {
+        Ok(message) => message,
+        Err(error) => {
+            store.release_request(key).await?;
+            modal_submit.edit_response(&ctx.http, EditInteractionResponse::new().content("Falha ao enviar solicitação. Tente novamente.")).await?;
+            return Err(error.into());
+        }
+    };
+    store.attach_request(key, channel_id, sent.id.get()).await?;
+    modal_submit.edit_response(&ctx.http, EditInteractionResponse::new().content("Sua solicitação foi enviada para aprovação.")).await?;
 
     Ok(())
 }
 
 pub async fn handle_approval_action(ctx: &Context, interaction: &ComponentInteraction, approved: bool, guild_config: &Guild) -> Result<()> {
-    let custom_id = &interaction.data.custom_id;
-    let target_user_id = custom_id.split('_').nth(1)
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
-
-    if let Some(member) = &interaction.member {
-        if !crate::permissions::is_admin(member, guild_config) && !crate::permissions::is_staff(member, guild_config) {
-            interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-                CreateInteractionResponseMessage::new()
-                    .content("Você não tem permissão para realizar esta ação.")
-                    .ephemeral(true)
-            )).await?;
+    interaction.defer_ephemeral(&ctx.http).await?;
+    let guild = interaction.guild_id.ok_or_else(|| crate::errors::BotError::Unauthorized("Guild only".into()))?;
+    if !support_state::staff(ctx, guild, interaction.user.id, guild_config).await? {
+        return Err(crate::errors::BotError::Unauthorized("Apenas staff autorizado".into()));
+    }
+    let target: u64 = interaction.data.custom_id.split('_').nth(1).and_then(|v| v.parse().ok()).filter(|v| *v != 0)
+        .ok_or_else(|| crate::errors::BotError::Validation("Usuário inválido".into()))?;
+    let store = support_state::store(ctx).await?;
+    let result = store.decide(Key::new(guild.get(), target), interaction.channel_id.get(), interaction.message.id.get(), || async {
+        // Revalidate current target membership; failures preserve pending state and controls.
+        let member = guild.member(&ctx.http, UserId::new(target)).await?;
+        if approved {
+            let role: u64 = guild_config.member_role_id.as_ref().and_then(|v| v.parse().ok()).filter(|v| *v != 0)
+                .ok_or_else(|| crate::errors::BotError::Validation("Cargo não configurado".into()))?;
+            member.add_role(&ctx.http, RoleId::new(role)).await?;
+        }
+        Ok(())
+    }).await;
+    match result {
+        Err(error) => {
+            interaction.edit_response(&ctx.http, EditInteractionResponse::new().content("Falha ao processar. Solicitação preservada; tente novamente.")).await?;
+            return Err(error);
+        }
+        Ok(false) => {
+            interaction.edit_response(&ctx.http, EditInteractionResponse::new().content("Solicitação expirada, inválida ou já processada.")).await?;
             return Ok(());
         }
+        Ok(true) => {}
     }
-
-    let thumbnail_url = interaction.message.embeds.first()
-        .and_then(|e| e.thumbnail.as_ref())
-        .map(|t| t.url.clone());
-
-    let mut updated_embed = CreateEmbed::new()
-        .title("Solicitação de Acesso")
-        .description(format!("<@{}> — {}", target_user_id, if approved { "Aprovado" } else { "Rejeitado" }))
-        .colour(Colour::new(0x2B2D31));
-
-    if let Some(url) = thumbnail_url {
-        updated_embed = updated_embed.thumbnail(url);
+    interaction.channel_id.edit_message(&ctx.http, interaction.message.id, EditMessage::new()
+        .embed(CreateEmbed::new().title("Solicitação de Acesso").description(format!("<@{}> — {}", target, if approved { "Aprovado" } else { "Rejeitado" })))
+        .components(vec![])).await?;
+    interaction.edit_response(&ctx.http, EditInteractionResponse::new().content("Solicitação processada.")).await?;
+    // Success notifications are unreachable on failed role assignment or stale requests.
+    if let Ok(user) = UserId::new(target).to_user(&ctx.http).await {
+        let _ = user.direct_message(&ctx.http, CreateMessage::new().content(if approved { "Seu acesso foi aprovado!" } else { "Sua solicitação foi rejeitada." })).await;
     }
-
-    interaction.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
-        CreateInteractionResponseMessage::new()
-            .embed(updated_embed)
-            .components(vec![])
-    )).await?;
-
-    let ctx_clone = ctx.clone();
-    let interaction_clone = interaction.clone();
-    let guild_config_clone = guild_config.clone();
-
-    tokio::spawn(async move {
-        if let Some(guild_id) = interaction_clone.guild_id {
-            if let Ok(member) = guild_id.member(&ctx_clone.http, target_user_id).await {
-                if approved {
-                    if let Some(role_id_str) = &guild_config_clone.member_role_id {
-                        if let Ok(role_id_num) = role_id_str.parse::<u64>() {
-                            if let Err(e) = member.add_role(&ctx_clone.http, RoleId::new(role_id_num)).await {
-                                error!("Failed to add role to member: {}", e);
-                            }
-                        }
-                    }
-
-                    let dm_embed = CreateEmbed::new()
-                        .title("Acesso Aprovado")
-                        .description("Sua solicitação de acesso ao servidor foi aprovada!")
-                        .colour(Colour::new(0x2B2D31));
-                    let (dm_embed, attachment) = crate::asset_manager::prepare_embed_large(&ctx_clone, "approved", dm_embed).await;
-                    let mut msg = CreateMessage::new().embed(dm_embed);
-                    if let Some(file) = attachment {
-                        msg = msg.add_file(file);
-                    }
-                    if let Ok(sent) = member.user.direct_message(&ctx_clone.http, msg).await {
-                        let http = ctx_clone.http.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                            let _ = sent.delete(&http).await;
-                        });
-                    }
-                } else {
-                    let dm_embed = CreateEmbed::new()
-                        .title("Acesso Rejeitado")
-                        .description("Sua solicitação de acesso ao servidor foi rejeitada.")
-                        .colour(Colour::new(0x2B2D31));
-                    let (dm_embed, attachment) = crate::asset_manager::prepare_embed_large(&ctx_clone, "rejected", dm_embed).await;
-                    let mut msg = CreateMessage::new().embed(dm_embed);
-                    if let Some(file) = attachment {
-                        msg = msg.add_file(file);
-                    }
-                    if let Ok(sent) = member.user.direct_message(&ctx_clone.http, msg).await {
-                        let http = ctx_clone.http.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                            let _ = sent.delete(&http).await;
-                        });
-                    }
-                }
-            }
-        }
-
-        {
-            let mut pending = PENDING_REQUESTS.lock().await;
-            pending.remove(&target_user_id);
-        }
-    });
-
     Ok(())
 }
