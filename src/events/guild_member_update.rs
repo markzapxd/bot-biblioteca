@@ -71,68 +71,22 @@ pub async fn handle(ctx: Context, old: Option<Member>, new: Option<Member>) {
                 }
             }
 
-            if let Ok(user) = crate::repositories::user_repo::find_or_create(pool, &user_id).await
-            {
-                let mut username_history = user.get_username_history();
-                let mut avatar_history = user.get_avatar_history();
-                let mut nickname_history = user.get_nickname_history();
-                let mut updated = false;
-
-                if let Some(old_member) = old.as_ref() {
-                    let old_nick = effective_nick(old_member);
-                    let new_nick = effective_nick(&member);
-                    if old_nick != new_nick {
-                        nickname_history.push(crate::models::NicknameEntry {
-                            name: old_nick.to_string(),
-                            date: chrono::Utc::now(),
-                        });
-                        updated = true;
-                    }
-
-                    if old_member.user.name != member.user.name {
-                        username_history.push(crate::models::UsernameEntry {
-                            name: old_member.user.name.clone(),
-                            date: chrono::Utc::now(),
-                        });
-                        updated = true;
-                    }
-
-                    if old_member.user.avatar != member.user.avatar {
-                        avatar_history.push(crate::models::AvatarEntry {
-                            url: old_member.user.face(),
-                            date: chrono::Utc::now(),
-                        });
-                        updated = true;
-                    }
+            if let Some(previous) = old.as_ref() {
+                use crate::repositories::user_repo::{append_history, HistoryKind};
+                let now = chrono::Utc::now();
+                let mut entries = Vec::new();
+                if effective_nick(previous) != effective_nick(&member) {
+                    entries.push((HistoryKind::Nickname, serde_json::json!({"name":effective_nick(previous), "date":now, "guild_id":member.guild_id.to_string()})));
                 }
-
-                if updated {
-                    if let Err(e) = crate::repositories::user_repo::update_username_history(
-                        pool,
-                        &user_id,
-                        serde_json::to_value(username_history).unwrap_or_default(),
-                    )
-                    .await
-                    {
-                        tracing::error!("Failed to update username history: {}", e);
-                    }
-                    if let Err(e) = crate::repositories::user_repo::update_avatar_history(
-                        pool,
-                        &user_id,
-                        serde_json::to_value(avatar_history).unwrap_or_default(),
-                    )
-                    .await
-                    {
-                        tracing::error!("Failed to update avatar history: {}", e);
-                    }
-                    if let Err(e) = crate::repositories::user_repo::update_nickname_history(
-                        pool,
-                        &user_id,
-                        serde_json::to_value(nickname_history).unwrap_or_default(),
-                    )
-                    .await
-                    {
-                        tracing::error!("Failed to update nickname history: {}", e);
+                if previous.user.name != member.user.name {
+                    entries.push((HistoryKind::Username, serde_json::json!({"name":previous.user.name, "date":now})));
+                }
+                if previous.user.avatar != member.user.avatar {
+                    entries.push((HistoryKind::Avatar, serde_json::json!({"url":previous.user.face(), "date":now})));
+                }
+                for (kind, entry) in entries {
+                    if let Err(e) = append_history(pool, &user_id, kind, entry).await {
+                        tracing::error!("Failed to append history: {}", e);
                     }
                 }
             }

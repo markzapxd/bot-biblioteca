@@ -32,6 +32,24 @@ impl EventHandler for Handler {
         events::ready::handle(ctx, ready).await;
     }
 
+    async fn cache_ready(&self, ctx: Context, guilds: Vec<GuildId>) {
+        for guild in guilds {
+            if let Some(state) = ctx.data.read().await.get::<BotStateKey>().cloned() {
+                if let Err(e) = jobs::voice_sync::initialize_guild(&ctx, &state.pool, guild).await {
+                    tracing::error!("Guild voice initialization failed: {}", e);
+                }
+            }
+        }
+    }
+
+    async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: Option<bool>) {
+        if let Some(state) = ctx.data.read().await.get::<BotStateKey>().cloned() {
+            if let Err(e) = jobs::voice_sync::initialize_guild(&ctx, &state.pool, guild.id).await {
+                tracing::error!("Guild voice initialization failed: {}", e);
+            }
+        }
+    }
+
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         events::interaction_create::handle(ctx, interaction).await;
     }
@@ -177,7 +195,37 @@ async fn main() {
         Err(_) => tracing::error!("Dashboard disabled: invalid authentication configuration"),
     }
 
-    if let Err(e) = client.start().await {
+    // Exactly one worker belongs to this client lifecycle, never to READY.
+    let worker_pool = pool.clone();
+    let worker_cache = client.cache.clone();
+    let worker = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            for guild in worker_cache.guilds() {
+                if worker_cache.guild(guild).is_none() { continue; }
+                if let Err(e) = jobs::voice_sync::initialize_cached_guild(&worker_cache, &worker_pool, guild).await {
+                    tracing::error!("Voice reconciliation failed: {}", e);
+                    continue;
+                }
+                if let Err(e) = sqlx::query("UPDATE voice_sessions SET duration=GREATEST(0,(EXTRACT(EPOCH FROM (NOW()-joined_at))*1000)::bigint), updated_at=NOW() WHERE guild_id=$1 AND active")
+                    .bind(guild.to_string()).execute(&worker_pool).await {
+                    tracing::error!("Voice duration update failed: {}", e);
+                }
+                let users = sqlx::query_scalar::<_, String>("SELECT DISTINCT user_id FROM voice_sessions WHERE guild_id=$1 AND active").bind(guild.to_string()).fetch_all(&worker_pool).await;
+                if let Ok(users) = users {
+                    for user in users {
+                        if let Err(e) = repositories::user_repo::recompute_voice_time(&worker_pool, &user).await {
+                            tracing::error!("Voice aggregate update failed: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    });
+    let result = client.start().await;
+    worker.abort();
+    if let Err(e) = result {
         tracing::error!("Client error: {}", e);
         std::process::exit(1);
     }

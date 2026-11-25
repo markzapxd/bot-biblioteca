@@ -151,8 +151,9 @@ pub async fn handle_nicknames_button(ctx: &Context, interaction: &ComponentInter
         }
     };
 
-    // Legacy nicknames have no guild provenance; do not disclose across guilds.
-    let history = Vec::new();
+    let guild = interaction.guild_id.map(|id| id.to_string());
+    let history: Vec<_> = user.get_nickname_history().into_iter()
+        .filter(|entry| entry.guild_id.is_some() && entry.guild_id == guild).collect();
     let (embed, rows) = build_nicknames_page(user_id, &history);
 
     interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
