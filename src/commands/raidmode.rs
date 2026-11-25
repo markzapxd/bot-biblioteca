@@ -23,7 +23,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         .ok_or_else(|| crate::errors::BotError::NotFound("Guild config not found".into()))?;
     permissions::require_admin(user_id, member, &guild_config)?;
 
-    let is_active = anti_raid::is_raid_active(guild_id.get());
+    let is_active = crate::services::lockdown::Store::new(_pool.clone()).raid_active(guild_id.get()).await?;
     let embed = build_raidmode_embed(is_active);
     let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "raidmode", embed).await;
     let row = build_raidmode_row(is_active);
@@ -44,7 +44,7 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
         CreateInteractionResponseMessage::new().ephemeral(true)
     )).await?;
 
-    let is_active = anti_raid::is_raid_active(guild_id.get());
+    let is_active = crate::services::lockdown::Store::new(pool.clone()).raid_active(guild_id.get()).await?;
 
     if is_active {
         anti_raid::disable_raid_mode(&ctx, guild_id).await?;

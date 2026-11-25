@@ -81,8 +81,8 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
     let staff_role = guild_id.create_role(&ctx, EditRole::new().name(".").colour(Colour::new(0x000001))).await?;
 
     
-    let mut verify_channel = guild_id.create_channel(&ctx, CreateChannel::new("verify").kind(ChannelType::Text)).await?;
-    let mut staff_channel = guild_id.create_channel(&ctx, CreateChannel::new("segregação").kind(ChannelType::Text)).await?;
+    let mut verify_channel = guild_id.create_channel(&ctx, CreateChannel::new("verify").kind(ChannelType::Text).permissions(vec![PermissionOverwrite { kind: PermissionOverwriteType::Role(guild_id.everyone_role()), allow: Permissions::empty(), deny: Permissions::VIEW_CHANNEL }])).await?;
+    let mut staff_channel = guild_id.create_channel(&ctx, CreateChannel::new("segregação").kind(ChannelType::Text).permissions(vec![PermissionOverwrite { kind: PermissionOverwriteType::Role(guild_id.everyone_role()), allow: Permissions::empty(), deny: Permissions::VIEW_CHANNEL }])).await?;
 
     
     guild_repo::upsert(pool, &guild_id_str).await?;
@@ -185,7 +185,7 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         }
 
         if let Err(e) = verify_channel.edit(&ctx.http, EditChannel::new().permissions(verify_overwrites)).await {
-            error!("Erro ao configurar canal verify: {}", e);
+            return Err(e.into());
         }
     }
 
@@ -221,7 +221,7 @@ pub async fn handle_full_setup(ctx: &Context, component: &ComponentInteraction, 
         }
 
         if let Err(e) = staff_channel.edit(&ctx.http, EditChannel::new().permissions(staff_overwrites)).await {
-            error!("Erro ao configurar canal segregação: {}", e);
+            return Err(e.into());
         }
     }
 

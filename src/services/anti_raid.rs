@@ -36,7 +36,7 @@ struct RaidState {
 
 static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 static JOIN_TRACKER: Mutex<Vec<JoinEvent>> = Mutex::new(Vec::new());
-static MESSAGE_TRACKER: LazyLock<Mutex<HashMap<u64, Vec<Instant>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static MESSAGE_TRACKER: LazyLock<Mutex<HashMap<(u64, u64), Vec<Instant>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static RAID_STATUS: LazyLock<Mutex<HashMap<u64, RaidState>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub async fn detect_join_raid(ctx: &Context, member: &Member, guild_config: &Guild) -> Result<()> {
@@ -62,7 +62,7 @@ pub async fn detect_join_raid(ctx: &Context, member: &Member, guild_config: &Gui
         trigger_raid(ctx, member.guild_id, &reason, guild_config).await?;
     }
 
-    if is_raid_active(guild_id) {
+    if crate::services::lockdown::Store::new(ctx.data.read().await.get::<crate::state::BotStateKey>().cloned().ok_or_else(|| BotError::Internal("No state".into()))?.pool.clone()).raid_active(guild_id).await? {
         let account_age = chrono::Utc::now() - member.user.created_at().with_timezone(&chrono::Utc);
         if account_age.num_days() < NEW_ACCOUNT_DAYS {
             punish(ctx, member, "New account joining during raid", guild_config).await?;
@@ -103,9 +103,10 @@ pub async fn detect_message_violation(ctx: &Context, message: &Message, guild_co
 
     let is_spam = {
         let mut tracker = MESSAGE_TRACKER.lock().unwrap();
-        let timestamps = tracker.entry(user_id).or_insert_with(Vec::new);
+        let timestamps = tracker.entry((message.guild_id.map(|g| g.get()).unwrap_or(0), user_id)).or_insert_with(Vec::new);
         let now = Instant::now();
         timestamps.retain(|t| now.duration_since(*t) < SPAM_INTERVAL);
+        if timestamps.len() >= SPAM_THRESHOLD { timestamps.remove(0); }
         timestamps.push(now);
 
         timestamps.len() >= SPAM_THRESHOLD
@@ -124,29 +125,11 @@ pub async fn detect_message_violation(ctx: &Context, message: &Message, guild_co
 }
 
 pub async fn trigger_raid(ctx: &Context, guild: GuildId, reason: &str, guild_config: &Guild) -> Result<()> {
-    let guild_id = guild.get();
-    let now = Instant::now();
-
-    let generation = {
-        let mut status = RAID_STATUS.lock().unwrap();
-        if let Some(state) = status.get_mut(&guild_id) {
-            if state.active {
-                return Ok(());
-            }
-            state.generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            state.active = true;
-            state.triggered_at = now;
-            state.auto_disable_at = now + LOCKDOWN_DURATION;
-        } else {
-            status.insert(guild_id, RaidState {
-                active: true,
-                generation: NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-                triggered_at: now,
-                auto_disable_at: now + LOCKDOWN_DURATION,
-            });
-        }
-        status[&guild_id].generation
-    };
+    let generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned().ok_or_else(|| BotError::Internal("No bot state".into()))?;
+    // Persist ownership and perform effects before any logging await. Failed effects
+    // remain pending and the lifecycle reconciler retries them through the same lock.
+    crate::services::lockdown::apply_action(ctx, &state.pool, guild, guild_config, crate::services::lockdown::Action::RaidStart(generation)).await?;
 
     let guild_name = if let Ok(guild_info) = guild.to_partial_guild(&ctx.http).await {
         guild_info.name.clone()
@@ -166,46 +149,14 @@ pub async fn trigger_raid(ctx: &Context, guild: GuildId, reason: &str, guild_con
         }
     }
 
-    if AUTO_LOCKDOWN {
-        let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned().ok_or_else(|| BotError::Internal("No bot state".into()))?;
-        crate::services::lockdown::apply_action(ctx, &state.pool, guild, guild_config, crate::services::lockdown::Action::RaidStart(generation)).await?;
-    }
-
-    let ctx_clone = ctx.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(LOCKDOWN_DURATION).await;
-        let valid = RAID_STATUS.lock().unwrap().get(&guild.get()).is_some_and(|s| s.active && s.generation == generation);
-        if valid {
-            if let Some(state) = ctx_clone.data.read().await.get::<crate::state::BotStateKey>().cloned() {
-                if let Ok(Some(config)) = crate::repositories::guild_repo::find_by_id(&state.pool, &guild.to_string()).await {
-                    if crate::services::lockdown::apply_action(&ctx_clone, &state.pool, guild, &config, crate::services::lockdown::Action::RaidEnd(generation)).await.is_ok() {
-                        let mut status = RAID_STATUS.lock().unwrap();
-                        if let Some(s) = status.get_mut(&guild.get()) { if s.generation == generation { s.active = false; } }
-                    }
-                }
-            }
-        }
-    });
 
     Ok(())
 }
 
 pub async fn disable_raid_mode(ctx: &Context, guild_id: GuildId) -> Result<()> {
-    let gid = guild_id.get();
-
-    let generation = {
-        let mut status = RAID_STATUS.lock().unwrap();
-        status.get_mut(&gid).map(|s| { s.active = false; s.generation })
-    };
-
-    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned()
-        .ok_or_else(|| BotError::Internal("No bot state".into()))?;
-    let guild_config = crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await?
-        .ok_or_else(|| BotError::NotFound("Guild config not found".into()))?;
-
-    if let Some(generation) = generation {
-        crate::services::lockdown::apply_action(ctx, &state.pool, guild_id, &guild_config, crate::services::lockdown::Action::RaidEnd(generation)).await?;
-    }
+    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned().ok_or_else(|| BotError::Internal("No bot state".into()))?;
+    let config = crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await?.ok_or_else(|| BotError::NotFound("Guild config".into()))?;
+    crate::services::lockdown::apply_action(ctx, &state.pool, guild_id, &config, crate::services::lockdown::Action::RaidDisable).await?;
 
     Ok(())
 }
@@ -342,4 +293,20 @@ fn count_emojis(content: &str) -> usize {
     }).count();
 
     custom_count + unicode_count
+}
+
+/// Called by the single lifecycle maintenance loop; no HTTP under these locks.
+pub fn prune_trackers(now: Instant) {
+    MESSAGE_TRACKER.lock().unwrap().retain(|_, timestamps| {
+        timestamps.retain(|t| now.saturating_duration_since(*t) < SPAM_INTERVAL);
+        !timestamps.is_empty()
+    });
+    JOIN_TRACKER.lock().unwrap().retain(|e| now.saturating_duration_since(e.timestamp) < MASS_JOIN_INTERVAL);
+    RAID_STATUS.lock().unwrap().retain(|_, s| s.active);
+}
+
+pub fn remove_guild(guild: u64) {
+    MESSAGE_TRACKER.lock().unwrap().retain(|(g, _), _| *g != guild);
+    JOIN_TRACKER.lock().unwrap().retain(|e| e.guild_id != guild);
+    RAID_STATUS.lock().unwrap().remove(&guild);
 }

@@ -50,6 +50,14 @@ impl EventHandler for Handler {
         }
     }
 
+    async fn guild_delete(&self, ctx: Context, guild: UnavailableGuild, _full: Option<Guild>) {
+        if guild.unavailable { return; }
+        services::anti_raid::remove_guild(guild.id.get());
+        if let Some(state) = ctx.data.read().await.get::<BotStateKey>().cloned() {
+            state.guild_cache.remove(&guild.id.to_string());
+        }
+    }
+
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         events::interaction_create::handle(ctx, interaction).await;
     }
@@ -198,11 +206,24 @@ async fn main() {
     // Exactly one worker belongs to this client lifecycle, never to READY.
     let worker_pool = pool.clone();
     let worker_cache = client.cache.clone();
+    let worker_http = client.http.clone();
     let mut worker = jobs::voice_sync::VoiceWorker::default();
     worker.start(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
+            services::anti_raid::prune_trackers(std::time::Instant::now());
+            let store = services::lockdown::Store::new(worker_pool.clone());
+            if let Ok(guilds) = store.pending_guilds().await {
+                for guild in guilds {
+                    if let Ok(id) = guild.parse::<u64>() {
+                        let http = worker_http.clone();
+                        if let Err(e) = store.change(id, services::lockdown::Action::Reconcile(chrono::Utc::now().timestamp()), vec![], |channel, permissions| {
+                            let http = http.clone(); async move { ChannelId::new(channel).edit(&http, EditChannel::new().permissions(permissions)).await?; Ok(()) }
+                        }).await { tracing::error!("Lockdown recovery failed: {}", e); }
+                    }
+                }
+            }
             for guild in worker_cache.guilds() {
                 if worker_cache.guild(guild).is_none() { continue; }
                 if let Err(e) = jobs::voice_sync::initialize_cached_guild(&worker_cache, &worker_pool, guild).await {
