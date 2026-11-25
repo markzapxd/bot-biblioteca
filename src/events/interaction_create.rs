@@ -1,5 +1,39 @@
 use serenity::all::{Context, Interaction};
 
+// None selects the ephemeral denial response; the handler is never polled on denial.
+async fn dispatch_authorized<A, C, F, T>(authorization: A, callback: C) -> Option<T>
+where
+    A: std::future::Future<Output = bool>,
+    C: FnOnce() -> F,
+    F: std::future::Future<Output = T>,
+{
+    if !authorization.await { return None; }
+    Some(callback().await)
+}
+
+#[cfg(test)]
+mod callback_lifecycle_tests {
+    use super::dispatch_authorized;
+    use std::cell::Cell;
+
+    #[tokio::test]
+    async fn panel_revoked_before_callback_selects_denial_without_invoking_handler() {
+        let current_membership = Cell::new(Ok(true));
+        let calls = Cell::new(0);
+        let dispatch = || dispatch_authorized(
+            async { current_membership.get().unwrap_or(false) },
+            || async { calls.set(calls.get() + 1); "handled" },
+        );
+        assert_eq!(dispatch().await, Some("handled")); // panel initially granted
+        current_membership.set(Ok(false)); // permission revoked before component callback
+        assert_eq!(dispatch().await, None); // selects production ephemeral denial branch
+        assert_eq!(calls.get(), 1);
+        current_membership.set(Err(())); // membership resolution unavailable
+        assert_eq!(dispatch().await, None);
+        assert_eq!(calls.get(), 1);
+    }
+}
+
 pub async fn handle(ctx: Context, interaction: Interaction) {
     let state = match ctx.data.read().await.get::<crate::state::BotStateKey>() {
         Some(s) => s.clone(),
@@ -73,21 +107,15 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 || custom_id.starts_with("lockdown_") || custom_id == "raidmode_toggle"
                 || custom_id.starts_with("approve_") || custom_id.starts_with("reject_")
                 || custom_id.starts_with("ticket_close");
-            let allowed = if custom_id.starts_with("owner_") {
+            let authorization = async { if custom_id.starts_with("owner_") {
                 crate::permissions::require_owner(component.user.id.get()).is_ok()
             } else if protected {
                 if let Some(guild_id) = component.guild_id {
                     crate::permissions::authorize(&ctx, guild_id, component.user.id, crate::permissions::Action::Configure, None).await.is_ok()
                 } else { false }
-            } else { true };
-            if !allowed {
-                let _ = component.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
-                    serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
-                )).await;
-                return;
-            }
-
-            let result = match *custom_id {
+            } else { true } };
+            let dispatched = dispatch_authorized(authorization, || async {
+                match *custom_id {
                 _ if custom_id == "privacy_toggle" => {
                     crate::commands::privacy::handle_toggle(&ctx, &component, &state.pool).await
                 }
@@ -287,6 +315,13 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                     crate::commands::card::handle_select_delete(&ctx, &component, &state.pool).await
                 }
                 _ => Ok(()),
+                }
+            }).await;
+            let Some(result) = dispatched else {
+                let _ = component.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
+                    serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
+                )).await;
+                return;
             };
 
             if let Err(e) = result {
