@@ -14,7 +14,7 @@ pub async fn append_history(pool: &PgPool, user_id: &str, kind: HistoryKind, ent
         HistoryKind::Nickname => ("nickname_history", "name"),
     };
     let sql = format!("INSERT INTO users(user_id, {column}) VALUES ($1, jsonb_build_array($2::jsonb)) ON CONFLICT(user_id) DO UPDATE SET {column} = (SELECT COALESCE(jsonb_agg(value ORDER BY ord), '[]'::jsonb) FROM jsonb_array_elements(COALESCE(users.{column}, '[]'::jsonb) || jsonb_build_array($2::jsonb)) WITH ORDINALITY e(value,ord) WHERE ord > jsonb_array_length(COALESCE(users.{column}, '[]'::jsonb)) + 1 - 500), updated_at=NOW() WHERE (SELECT value->>$3 FROM jsonb_array_elements(COALESCE(users.{column}, '[]'::jsonb)) WITH ORDINALITY e(value,ord) WHERE ($4::bool = FALSE OR value->>'guild_id' IS NOT DISTINCT FROM $2::jsonb->>'guild_id') ORDER BY ord DESC LIMIT 1) IS DISTINCT FROM $2::jsonb->>$3");
-    sqlx::query(&sql).bind(user_id).bind(entry).bind(key).bind(matches!(kind, HistoryKind::Nickname)).execute(pool).await?;
+    sqlx::query(&sql).bind(user_id).bind(entry).bind(key).bind(matches!(kind, HistoryKind::Nickname | HistoryKind::Avatar)).execute(pool).await?;
     Ok(())
 }
 

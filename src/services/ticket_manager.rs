@@ -172,6 +172,28 @@ pub async fn handle_ticket_close_confirm(ctx: &Context, interaction: &ComponentI
 
 pub async fn handle_close_ticket_command(ctx: &Context, interaction: &CommandInteraction, target_user_id: UserId) -> Result<()> {
     interaction.defer_ephemeral(&ctx.http).await?;
+    finish_deferred_close(
+        close_ticket_command_deferred(ctx, interaction, target_user_id),
+        || async {
+            interaction.edit_response(&ctx.http, EditInteractionResponse::new()
+                .content("Não foi possível fechar o ticket. Verifique sua autorização e a configuração do servidor.")).await?;
+            Ok(())
+        },
+    ).await
+}
+
+async fn finish_deferred_close<T, F, R>(operation: T, respond: F) -> Result<()>
+where
+    T: std::future::Future<Output = Result<()>>,
+    F: FnOnce() -> R,
+    R: std::future::Future<Output = Result<()>>,
+{
+    let result = operation.await;
+    if result.is_err() { respond().await?; }
+    result
+}
+
+async fn close_ticket_command_deferred(ctx: &Context, interaction: &CommandInteraction, target_user_id: UserId) -> Result<()> {
     let guild = interaction.guild_id.ok_or_else(|| crate::errors::BotError::Unauthorized("Guild only".into()))?;
     let store = support_state::store(ctx).await?;
     let Some(channel) = store.ticket_channel(Key::new(guild.get(), target_user_id.get())).await? else {
@@ -220,3 +242,26 @@ pub async fn handle_remove_user_from_ticket(ctx: &Context, interaction: &Command
     interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod deferred_close_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn deferred_errors_receive_terminal_response() {
+        for error in [
+            crate::errors::BotError::Unauthorized("denied".into()),
+            crate::errors::BotError::Unauthorized("configuration missing".into()),
+            crate::errors::BotError::Internal("membership lookup failed".into()),
+        ] {
+            let called = std::cell::Cell::new(0);
+            let result = finish_deferred_close(async { Err(error) }, || async {
+                called.set(called.get() + 1);
+                Ok(())
+            }).await;
+            assert!(result.is_err());
+            assert_eq!(called.get(), 1);
+        }
+    }
+}
+

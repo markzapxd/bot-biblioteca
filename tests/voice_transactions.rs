@@ -4,6 +4,21 @@ use sqlx::PgPool;
 
 #[tokio::test]
 #[ignore = "requires explicit disposable PostgreSQL"]
+async fn avatar_history_deduplicates_within_each_provenance() {
+    let pool = pool().await;
+    database::run_migrations(&pool).await.unwrap();
+    let user = uuid::Uuid::new_v4().to_string();
+    for guild in [Some("A"), None, Some("B"), Some("A"), None, Some("B")] {
+        let mut entry = serde_json::json!({"url":"identical", "date":Utc::now()});
+        if let Some(guild) = guild { entry["guild_id"] = guild.into(); }
+        user_repo::append_history(&pool, &user, user_repo::HistoryKind::Avatar, entry).await.unwrap();
+    }
+    let row = user_repo::find_by_id(&pool, &user).await.unwrap().unwrap();
+    assert_eq!(row.avatar_history.as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+#[ignore = "requires explicit disposable PostgreSQL"]
 async fn migration_deduplicates_once_and_preserves_legacy_history() {
     let pool = pool().await;
     let schema = format!("task4_{}", uuid::Uuid::new_v4().simple());
@@ -22,7 +37,7 @@ async fn migration_deduplicates_once_and_preserves_legacy_history() {
     let user = user_repo::find_by_id(&isolated,"legacy").await.unwrap().unwrap();
     assert_eq!(user.username_history.as_array().unwrap().len(),600);
     assert_eq!(user.total_voice_time,Some(123));
-    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT COUNT(*) FROM bot_schema_migrations").fetch_one(&isolated).await.unwrap(),4);
+    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT COUNT(*) FROM bot_schema_migrations").fetch_one(&isolated).await.unwrap(),6);
     isolated.close().await;
     sqlx::query(&format!("DROP SCHEMA {schema} CASCADE")).execute(&pool).await.unwrap();
 }

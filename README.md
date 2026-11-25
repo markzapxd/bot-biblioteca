@@ -77,7 +77,9 @@ rtk createuser bibliotecario -P
 rtk cp .env.example .env
 ```
 
-Edite `.env` com suas credenciais:
+Edite `.env` localmente com suas credenciais; nunca versione ou cole o arquivo em logs. Defina `POSTGRES_PASSWORD` com senha exclusiva e ajuste `DATABASE_URL` para a mesma credencial (codifique caracteres reservados na URL). Alterar `POSTGRES_PASSWORD` **não altera a senha de um volume PostgreSQL já inicializado**: nesse caso faça rotação explícita no banco e atualize os consumidores, sem apagar o volume.
+
+Exemplo ilustrativo (substitua os placeholders antes de iniciar):
 
 ```env
 DISCORD_TOKEN=seu_token_discord
@@ -124,6 +126,12 @@ O bot irá:
 4. Conectar ao Discord Gateway
 5. Registrar comandos slash em cada guild
 6. Iniciar o dashboard API na porta configurada
+
+## Persistência, retenção e recuperação
+
+As migrations aditivas são executadas no startup e registradas em `bot_schema_migrations`; faça backup antes de atualizar. Não altere migrations já aplicadas. Históricos novos são limitados às últimas 500 entradas por tipo (apelidos e avatares preservam proveniência por guild); a migration não apaga históricos legados automaticamente. Solicitações de verificação expiram em 24 horas. Sessões web não sobrevivem a restart.
+
+Snapshots de lockdown e identidade de tickets são persistidos. A restauração depende de permissões e disponibilidade do Discord; operações externas não são transações PostgreSQL. Um crash entre criação/exclusão externa e gravação pode exigir reconciliação manual pelo operador. Não remova registros de recuperação sem conferir o estado real. A serialização de operações de guild é local ao processo; não execute múltiplas instâncias concorrentes sobre a mesma guild como se houvesse coordenação distribuída.
 
 ## Deploy com Docker
 
