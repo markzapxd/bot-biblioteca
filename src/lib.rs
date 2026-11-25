@@ -4,6 +4,8 @@ pub mod commands;
 pub mod config;
 pub mod database;
 pub mod dto;
+pub mod dashboard;
+pub mod dashboard_auth;
 pub mod embeds;
 pub mod errors;
 pub mod events;

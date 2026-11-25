@@ -22,7 +22,9 @@ services:
       ASSETS_DIR: /app/assets/images
       DATABASE_URL: postgres://bibliotecario:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/bibliotecario
     ports:
-      - "3059:3050"
+      # Loopback publication by default. Remote dashboard requires direct TLS
+      # and an explicitly reviewed network publication preserving client IPs.
+      - "127.0.0.1:3059:3050"
     depends_on:
       db:
         condition: service_healthy

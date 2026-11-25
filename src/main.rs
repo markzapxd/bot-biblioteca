@@ -6,6 +6,7 @@ mod cache;
 mod commands;
 mod config;
 mod dashboard;
+mod dashboard_auth;
 mod database;
 mod dto;
 mod embeds;
@@ -146,20 +147,35 @@ async fn main() {
         start_time: bot_state.start_time,
     };
 
-    let app = dashboard::create_router(dashboard_state);
-    let listener = match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await {
-        Ok(l) => l,
-        Err(e) => {
-            tracing::error!("Failed to bind dashboard port: {}", e);
-            std::process::exit(1);
+    match dashboard_auth::DashboardAuth::from_env() {
+        Ok(Some(auth)) => {
+            let port = config.port;
+            tokio::spawn(async move {
+                let tls = auth.tls;
+                let app = dashboard::create_router_with_auth(dashboard_state, Some(auth));
+                if tls {
+                    let _ = rustls::crypto::ring::default_provider().install_default();
+                    let cert = std::env::var("DASHBOARD_TLS_CERT").unwrap_or_default();
+                    let key = std::env::var("DASHBOARD_TLS_KEY").unwrap_or_default();
+                    let tls = match axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await {
+                        Ok(tls) => tls,
+                        Err(_) => { tracing::error!("Dashboard disabled: invalid TLS configuration"); return; }
+                    };
+                    if axum_server::bind_rustls(([0, 0, 0, 0], port).into(), tls)
+                        .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.is_err() {
+                        tracing::error!("Dashboard TLS server stopped");
+                    }
+                } else {
+                    match tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await {
+                        Ok(listener) => { if axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.is_err() { tracing::error!("Dashboard server stopped"); } }
+                        Err(_) => tracing::error!("Dashboard disabled: cannot bind loopback listener"),
+                    }
+                }
+            });
         }
-    };
-
-    tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app).await {
-            tracing::error!("Dashboard server error: {}", e);
-        }
-    });
+        Ok(None) => tracing::info!("Dashboard disabled: administrator credentials absent"),
+        Err(_) => tracing::error!("Dashboard disabled: invalid authentication configuration"),
+    }
 
     if let Err(e) = client.start().await {
         tracing::error!("Client error: {}", e);

@@ -22,15 +22,19 @@ pub struct DashboardState {
 }
 
 pub fn create_router(state: DashboardState) -> Router {
-    Router::new()
-        .route("/health", get(health))
+    create_router_with_auth(state, crate::dashboard_auth::DashboardAuth::from_env().ok().flatten())
+}
+
+pub fn create_router_with_auth(state: DashboardState, auth: Option<crate::dashboard_auth::DashboardAuth>) -> Router {
+    let private = Router::new()
         .route("/api/stats", get(get_stats))
         .route("/api/guilds", get(get_guilds))
         .route("/api/config/:guild_id", get(get_config).post(update_config))
         .route("/api/message", post(send_message))
         .route("/api/role", post(create_role))
         .route("/api/messages/:channel_id", get(get_messages))
-        .with_state(state)
+        .with_state(state);
+    crate::dashboard_auth::protect(private, auth).route("/health", get(health))
 }
 
 async fn health() -> &'static str {

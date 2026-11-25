@@ -18,6 +18,16 @@ Bot Discord para gerenciamento completo de servidores, escrito em Rust com Postg
 - **Dashboard Web** — API REST para administração remota
 - **Tema Unificado** — Paleta de cores e embeds consistentes (#2B2D31)
 
+## Acesso seguro ao dashboard
+
+O dashboard é opcional: sem `DASHBOARD_ADMIN_USER` e `DASHBOARD_ADMIN_PASSWORD`, nenhum listener é iniciado; o bot continua. Configure ambos (senha única de pelo menos 16 bytes). Esta conta é o administrador do bot, com acesso a todas as rotas administrativas, não uma identidade Discord. Configuração inválida/TLS inválido desabilita apenas o dashboard, sem registrar segredos.
+
+Acesse `/login` para entrar e `/` para obter o token CSRF e sair. A API existente é preservada; mutações requerem cookie e `X-CSRF-Token`. Logout usa formulário com token CSRF. Sessões opacas em memória expiram após oito horas, são revogadas no logout e perdidas ao reiniciar. Cookies são HttpOnly/SameSite=Strict e Secure quando TLS está ativo. Há limite de 256 sessões (incluindo formulários de login de dez minutos), 256 registros de tentativas e dez tentativas por IP/minuto. Saturação retorna 429 sem expulsar sessões válidas.
+
+Sem TLS o listener liga **somente em 127.0.0.1**, para acesso local direto. Para acesso remoto configure `DASHBOARD_TLS_CERT` e `DASHBOARD_TLS_KEY` com caminhos de arquivos PEM (certificado confiável para o hostname e chave privada protegida). O servidor então oferece **HTTPS direto** na porta `PORT`; não há fallback HTTP. Em containers monte esses arquivos somente-leitura e ajuste a publicação da porta explicitamente. A publicação padrão do Compose é loopback; sem TLS o listener interno loopback não fica acessível pelo port mapping. Nunca publique o endpoint HTTP por proxy.
+
+O peer TCP real deve ser loopback ou 10.0.0.0/8, inclusive IPv4 mapeado em IPv6. Não há suporte a proxy reverso/terminação TLS externa: headers Forwarded/X-Forwarded-For/X-Forwarded-Proto/X-Real-IP são rejeitados, não usados para autorização. **Uma conexão loopback de um proxy não prova a rede do cliente original.** Um proxy que remova todos os headers é indistinguível de cliente local; por isso não encaminhe o listener por nenhum proxy/túnel e restrinja processos locais/conectividade com firewall. NAT/publicação Docker deve preservar o IP original; não use NAT que transforme clientes externos em peers permitidos. `/health` é público e retorna somente `OK` quando o servidor está habilitado.
+
 ## Stack
 
 | Componente | Tecnologia |
