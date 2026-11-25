@@ -140,3 +140,8 @@ pub async fn find_by_guild_with_duration(
     .await?;
     Ok(sessions)
 }
+
+pub async fn find_by_user_guild(pool: &PgPool, user_id: &str, guild_id: &str, limit: i64) -> Result<Vec<VoiceSession>> {
+    Ok(sqlx::query_as::<_, VoiceSession>("SELECT * FROM voice_sessions WHERE user_id = $1 AND guild_id = $2 ORDER BY joined_at DESC LIMIT $3")
+        .bind(user_id).bind(guild_id).bind(limit).fetch_all(pool).await?)
+}

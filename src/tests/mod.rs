@@ -66,8 +66,9 @@ mod permission_tests {
 
     #[test]
     fn test_is_owner() {
-        assert!(permissions::is_owner(852879300336418837));
-        assert!(!permissions::is_owner(123456789));
+        let configured = std::env::var("OWNER_ID").ok().and_then(|v| v.parse::<u64>().ok()).filter(|id| *id != 0);
+        assert_eq!(permissions::is_owner(852879300336418837), configured == Some(852879300336418837));
+        assert!(!permissions::is_owner(0));
     }
 }
 

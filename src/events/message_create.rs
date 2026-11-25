@@ -50,30 +50,18 @@ async fn handle_reloadslash(ctx: &Context, msg: &Message) -> crate::errors::Resu
     let guild_id = msg.guild_id.ok_or_else(|| {
         crate::errors::BotError::Validation("Comando apenas em servidor".into())
     })?;
-    let member = guild_id.member(ctx, msg.author.id).await?;
-    let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned()
-        .ok_or_else(|| crate::errors::BotError::Internal("No bot state".into()))?;
-    let guild_config = crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await?
-        .ok_or_else(|| crate::errors::BotError::Validation("Guild config not found".into()))?;
-    if let Err(e) = permissions::require_admin(msg.author.id.get(), &member, &guild_config) {
-        let _ = msg.reply(ctx, format!("{}", e)).await;
-        return Ok(());
-    }
-
+    permissions::authorize(ctx, guild_id, msg.author.id, permissions::Action::Configure, None).await?;
     let mut reply = msg.reply(ctx, "Apagando e re-registrando comandos...").await?;
 
-    let guilds = ctx.cache.guilds();
+    let guilds = if msg.content.split_whitespace().any(|word| word == "global") {
+        permissions::require_owner(msg.author.id.get())?;
+        ctx.cache.guilds()
+    } else { vec![guild_id] };
     let count = guilds.len();
-
     let mut cmds = Vec::new();
     crate::commands::register_all(&mut cmds).await;
-
     for guild_id in &guilds {
-        let _ = guild_id.set_commands(ctx, vec![]).await;
-    }
-
-    for guild_id in &guilds {
-        let _ = guild_id.set_commands(ctx, cmds.clone()).await;
+        guild_id.set_commands(ctx, cmds.clone()).await?;
     }
 
     let embed = crate::theme::success(

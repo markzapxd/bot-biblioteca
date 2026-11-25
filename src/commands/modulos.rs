@@ -24,12 +24,10 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
 
 pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, guild_cache: &GuildCache) -> Result<()> {
     let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
-    let member = interaction.member.as_ref().ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
-    let user_id = interaction.user.id.get();
 
     let guild_id_str = guild_id.to_string();
     let config = guild_cache.get(&guild_id_str).ok_or(crate::errors::BotError::NotFound("Guild config not found".into()))?;
-    permissions::require_admin(user_id, member, &config)?;
+    permissions::authorize(ctx, guild_id, interaction.user.id, permissions::Action::Configure, None).await?;
     let modules = config.get_modules();
 
     let embed = build_modules_embed(&modules);

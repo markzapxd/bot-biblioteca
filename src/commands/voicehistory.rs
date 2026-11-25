@@ -38,12 +38,21 @@ fn format_timestamp(ts: DateTime<Utc>) -> String {
 }
 
 pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
+    let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let target = interaction.data.options.iter().find(|o| o.name == "user").and_then(|o| o.value.as_user_id()).ok_or(BotError::Validation("User required".into()))?;
+    let profile = crate::repositories::user_repo::find_by_id(pool, &target.to_string()).await?;
+    if !crate::permissions::can_view_profile(ctx, Some(guild_id), interaction.user.id, target.get(), profile.map_or(true, |u| u.is_private_mode())).await {
+        interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content("Este perfil é privado.").ephemeral(true))).await?;
+        return Ok(());
+    }
     let user_id_str = target.to_string();
 
-    let (total_sessions, total_duration_ms) = voice_session_repo::get_user_stats(pool, &user_id_str).await?;
-    let sessions = voice_session_repo::find_by_user(pool, &user_id_str, 20).await?;
 
+    let sessions = voice_session_repo::find_by_user_guild(pool, &user_id_str, &guild_id.to_string(), 20).await?;
+
+    let sessions = crate::permissions::visible_voice_sessions(ctx, guild_id, interaction.user.id, sessions).await?;
+    let total_sessions = sessions.len() as i64;
+    let total_duration_ms: i64 = sessions.iter().map(|s| s.duration.unwrap_or(0)).sum();
     if sessions.is_empty() {
         let content = format!(
             "Voice History\n\nTotal Sessions: 0\nTotal Voice Time: 0m\nLast Activity: --\n\nNo voice sessions recorded."

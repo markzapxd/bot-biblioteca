@@ -49,8 +49,6 @@ pub async fn build_user_info(
         None
     };
 
-    let total_voice = user.total_voice_time.unwrap_or(0);
-    let voice_formatted = crate::utils::time::format_duration(total_voice);
 
     let embed = {
         let mut e = CreateEmbed::new()
@@ -59,7 +57,6 @@ pub async fn build_user_info(
             .field("**ID**", format!("`{}`", target_user.id), true)
             .field("**Conta Criada**", format!("`{}`", account_created.format("%d/%m/%Y %H:%M")), true)
             .field("**Privado**", format!("`{}`", if is_private { "Sim" } else { "Não" }), true)
-            .field("**Tempo em Voz**", format!("`{}`", voice_formatted), true)
             .colour(Colour::new(0x2B2D31));
         if let Some(joined) = guild_join_date {
             e = e.field("**Entrou no Servidor**", format!("`{}`", joined.format("%d/%m/%Y %H:%M")), true);
@@ -146,21 +143,15 @@ pub async fn handle_user_info_back(ctx: &Context, interaction: &ComponentInterac
         }
     };
 
-    let is_staff = if let Some(member) = &interaction.member {
-        crate::permissions::is_staff(member, &guild_config)
-    } else {
-        false
-    };
-
+    let is_staff = if let Some(guild_id) = interaction.guild_id {
+        crate::permissions::authorize(ctx, guild_id, interaction.user.id, crate::permissions::Action::Configure, None).await.is_ok()
+    } else { false };
     let result = build_user_info(ctx, &target_user, &guild_config, interaction.user.id.get(), is_staff, pool).await?;
 
-    if let Some(embed) = result.embed {
-        let mut edit = EditInteractionResponse::new().embed(embed);
-        if let Some(row) = result.action_row {
-            edit = edit.components(vec![row]);
-        }
-        interaction.edit_response(&ctx.http, edit).await?;
-    }
-
+    let mut message = CreateInteractionResponseMessage::new().ephemeral(true);
+    if let Some(content) = result.content { message = message.content(content); }
+    if let Some(embed) = result.embed { message = message.embed(embed); }
+    message = message.components(result.action_row.into_iter().collect());
+    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(message)).await?;
     Ok(())
 }

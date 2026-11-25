@@ -39,9 +39,7 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
 }
 
 pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
-    let member = interaction.member.as_ref().ok_or(BotError::Validation("Guild only".into()))?;
-    let user_id = interaction.user.id.get();
-    permissions::require_moderator(user_id, member)?;
+
 
     let subcommand = interaction.data.options.first()
         .ok_or(BotError::Validation("Subcommand required".into()))?;
@@ -50,6 +48,15 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
         CommandDataOptionValue::SubCommand(options) => options,
         _ => return Err(BotError::Validation("Invalid subcommand".into())),
     };
+
+    let action = match subcommand.name.as_str() {
+        "ban" => permissions::Action::Ban,
+        "kick" => permissions::Action::Kick,
+        "mute" | "unmute" => permissions::Action::Timeout,
+        "warn" => permissions::Action::Warn,
+        _ => return Err(BotError::Validation("Invalid subcommand".into())),
+    };
+    permissions::authorize(ctx, interaction.guild_id.ok_or(BotError::Validation("Guild only".into()))?, interaction.user.id, action, Some(extract_user(sub_options)?)).await?;
 
     match subcommand.name.as_str() {
         "ban" => handle_ban(ctx, interaction, sub_options).await,

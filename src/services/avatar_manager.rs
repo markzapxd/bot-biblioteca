@@ -5,6 +5,7 @@ use crate::errors::Result;
 use crate::models::AvatarEntry;
 
 pub async fn handle_avatar_history(ctx: &Context, interaction: &ComponentInteraction, user_id: u64, page: usize, pool: &sqlx::PgPool) -> Result<()> {
+    if !crate::permissions::require_profile(ctx, interaction, pool, user_id).await? { return Ok(()); }
     let user = match crate::repositories::user_repo::find_by_id(pool, &user_id.to_string()).await {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -24,9 +25,9 @@ pub async fn handle_avatar_history(ctx: &Context, interaction: &ComponentInterac
     let history = user.get_avatar_history();
     let (embed, rows) = build_avatar_page(user_id, &history, page);
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
+    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
-            .embed(embed)
+            .ephemeral(true).embed(embed)
             .components(rows)
     )).await?;
 

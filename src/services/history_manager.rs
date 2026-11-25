@@ -104,6 +104,7 @@ fn build_navigation_buttons(user_id: u64, active: &str) -> CreateActionRow {
 }
 
 pub async fn handle_names_button(ctx: &Context, interaction: &ComponentInteraction, user_id: u64, pool: &PgPool) -> Result<()> {
+    if !crate::permissions::require_profile(ctx, interaction, pool, user_id).await? { return Ok(()); }
     let user = match crate::repositories::user_repo::find_by_id(pool, &user_id.to_string()).await {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -123,9 +124,9 @@ pub async fn handle_names_button(ctx: &Context, interaction: &ComponentInteracti
     let history = user.get_username_history();
     let (embed, rows) = build_names_page(user_id, &history);
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
+    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
-            .embed(embed)
+            .ephemeral(true).embed(embed)
             .components(rows)
     )).await?;
 
@@ -133,6 +134,7 @@ pub async fn handle_names_button(ctx: &Context, interaction: &ComponentInteracti
 }
 
 pub async fn handle_nicknames_button(ctx: &Context, interaction: &ComponentInteraction, user_id: u64, pool: &PgPool) -> Result<()> {
+    if !crate::permissions::require_profile(ctx, interaction, pool, user_id).await? { return Ok(()); }
     let user = match crate::repositories::user_repo::find_by_id(pool, &user_id.to_string()).await {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -149,12 +151,13 @@ pub async fn handle_nicknames_button(ctx: &Context, interaction: &ComponentInter
         }
     };
 
-    let history = user.get_nickname_history();
+    // Legacy nicknames have no guild provenance; do not disclose across guilds.
+    let history = Vec::new();
     let (embed, rows) = build_nicknames_page(user_id, &history);
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
+    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
-            .embed(embed)
+            .ephemeral(true).embed(embed)
             .components(rows)
     )).await?;
 
@@ -162,6 +165,7 @@ pub async fn handle_nicknames_button(ctx: &Context, interaction: &ComponentInter
 }
 
 pub async fn handle_avatars_button(ctx: &Context, interaction: &ComponentInteraction, user_id: u64, page: usize, pool: &PgPool) -> Result<()> {
+    if !crate::permissions::require_profile(ctx, interaction, pool, user_id).await? { return Ok(()); }
     let user = match crate::repositories::user_repo::find_by_id(pool, &user_id.to_string()).await {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -181,9 +185,9 @@ pub async fn handle_avatars_button(ctx: &Context, interaction: &ComponentInterac
     let history = user.get_avatar_history();
     let (embed, rows) = build_avatars_page(user_id, &history, page);
 
-    interaction.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
+    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
-            .embed(embed)
+            .ephemeral(true).embed(embed)
             .components(rows)
     )).await?;
 

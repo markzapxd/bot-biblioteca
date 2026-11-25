@@ -23,13 +23,11 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     if user.is_private_mode() {
         let requester = interaction.user.id;
         let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
-        let guild_config = _guild_cache.get(&guild_id.to_string())
-            .ok_or_else(|| crate::errors::BotError::NotFound("Guild config not found".into()))?;
-        let is_staff = interaction.member.as_ref().map(|m| permissions::is_admin(m, &guild_config)).unwrap_or(false);
-        if requester != target && !is_staff && !permissions::is_owner(requester.get()) {
+        let is_staff = permissions::authorize(ctx, guild_id, interaction.user.id, permissions::Action::Configure, None).await.is_ok();
+        if requester != target && !is_staff {
             let embed = embeds::warning("Private", "This user has privacy mode enabled.");
             let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "names", embed).await;
-            let mut msg = CreateInteractionResponseMessage::new().embed(embed).ephemeral(true);
+            let mut msg = CreateInteractionResponseMessage::new().ephemeral(true).embed(embed);
             if let Some(file) = attachment {
                 msg = msg.add_file(file);
             }
@@ -41,7 +39,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     let username_history = user.get_username_history();
     let (embed, rows) = history_manager::build_names_page(target.get(), &username_history);
 
-    let msg = CreateInteractionResponseMessage::new().embed(embed).components(rows);
+    let msg = CreateInteractionResponseMessage::new().ephemeral(true).embed(embed).components(rows);
 
     interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
     Ok(())

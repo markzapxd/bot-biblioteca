@@ -37,7 +37,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
         updated_at: chrono::Utc::now(),
     });
     let interaction_user_id = interaction.user.id.get();
-    let is_staff = interaction.member.as_ref().map(|m| crate::permissions::is_staff(m, &guild_config)).unwrap_or(false);
+    let is_staff = crate::permissions::authorize(ctx, guild_id, interaction.user.id, crate::permissions::Action::Configure, None).await.is_ok();
 
     let result = user_info_manager::build_user_info(ctx, &target_user, &guild_config, interaction_user_id, is_staff, pool).await?;
 
@@ -47,7 +47,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
         return Ok(());
     }
 
-    let mut msg = CreateInteractionResponseMessage::new();
+    let mut msg = CreateInteractionResponseMessage::new().ephemeral(true);
     if let Some(embed) = result.embed {
         msg = msg.embed(embed);
     }

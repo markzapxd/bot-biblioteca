@@ -59,6 +59,7 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
 }
 
 pub async fn handle_setrole_button(ctx: &Context, component: &ComponentInteraction) -> Result<()> {
+    permissions::require_owner(component.user.id.get())?;
     let user_input = CreateInputText::new(InputTextStyle::Short, "User ID", "owner_setrole_user")
         .placeholder("ID do usuario")
         .required(true);
@@ -88,6 +89,7 @@ fn extract_modal_row(rows: &[ActionRow], custom_id: &str) -> Option<String> {
 }
 
 pub async fn handle_setrole_modal(ctx: &Context, modal: &ModalInteraction) -> Result<()> {
+    permissions::require_owner(modal.user.id.get())?;
     let user_id_str = extract_modal_row(&modal.data.components, "owner_setrole_user")
         .ok_or_else(|| BotError::Validation("User ID nao fornecido".into()))?;
     let role_id_str = extract_modal_row(&modal.data.components, "owner_setrole_role")
@@ -163,6 +165,7 @@ pub async fn handle_finally(ctx: &Context, interaction: &ComponentInteraction) -
 }
 
 pub async fn handle_clear_button(ctx: &Context, component: &ComponentInteraction) -> Result<()> {
+    permissions::require_owner(component.user.id.get())?;
     let channel_input = CreateInputText::new(InputTextStyle::Short, "Channel ID (opcional)", "owner_clear_channel")
         .placeholder("Deixe vazio para o canal atual")
         .required(false);

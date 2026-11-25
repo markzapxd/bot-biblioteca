@@ -63,6 +63,25 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 }
             };
 
+            let protected = custom_id.starts_with("modules_") || custom_id.starts_with("logs_")
+                || custom_id.starts_with("cfg_") || custom_id.starts_with("card_")
+                || custom_id.starts_with("lockdown_") || custom_id == "raidmode_toggle"
+                || custom_id.starts_with("approve_") || custom_id.starts_with("reject_")
+                || custom_id.starts_with("ticket_close");
+            let allowed = if custom_id.starts_with("owner_") {
+                crate::permissions::require_owner(component.user.id.get()).is_ok()
+            } else if protected {
+                if let Some(guild_id) = component.guild_id {
+                    crate::permissions::authorize(&ctx, guild_id, component.user.id, crate::permissions::Action::Configure, None).await.is_ok()
+                } else { false }
+            } else { true };
+            if !allowed {
+                let _ = component.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
+                    serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
+                )).await;
+                return;
+            }
+
             let result = match *custom_id {
                 _ if custom_id == "privacy_toggle" => {
                     crate::commands::privacy::handle_toggle(&ctx, &component, &state.pool).await
@@ -318,6 +337,19 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 }
             };
 
+            let allowed = if custom_id.starts_with("owner_") {
+                crate::permissions::require_owner(modal_submit.user.id.get()).is_ok()
+            } else if custom_id.starts_with("card_") {
+                if let Some(guild_id) = modal_submit.guild_id {
+                    crate::permissions::authorize(&ctx, guild_id, modal_submit.user.id, crate::permissions::Action::Configure, None).await.is_ok()
+                } else { false }
+            } else { true };
+            if !allowed {
+                let _ = modal_submit.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
+                    serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
+                )).await;
+                return;
+            }
             let result = match custom_id.as_str() {
                 "referral_modal" => {
                     crate::services::member_manager::handle_referral_modal_submit(&ctx, &modal_submit, &guild_config).await
