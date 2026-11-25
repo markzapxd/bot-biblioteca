@@ -51,10 +51,8 @@ impl EventHandler for Handler {
     }
 
     async fn guild_delete(&self, ctx: Context, guild: UnavailableGuild, _full: Option<Guild>) {
-        if guild.unavailable { return; }
-        services::anti_raid::remove_guild(guild.id.get());
         if let Some(state) = ctx.data.read().await.get::<BotStateKey>().cloned() {
-            state.guild_cache.remove(&guild.id.to_string());
+            services::anti_raid::guild_deleted(&state.guild_cache, guild.id.get(), guild.unavailable);
         }
     }
 

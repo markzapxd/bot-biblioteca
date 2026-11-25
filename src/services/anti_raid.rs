@@ -317,6 +317,13 @@ pub fn prune_trackers(now: Instant) {
     // evictable tracker. Recovery and generation checks remain there.
 }
 
+/// Gateway lifecycle cleanup only; durable lockdown recovery is independent.
+pub fn guild_deleted(cache: &crate::cache::GuildCache, guild: u64, unavailable: bool) {
+    if unavailable { return; }
+    remove_guild(guild);
+    cache.remove(&guild.to_string());
+}
+
 pub fn remove_guild(guild: u64) {
     MESSAGE_TRACKER.lock().unwrap().remove_guild(guild);
     JOIN_TRACKER.lock().unwrap().remove_guild(guild);
@@ -325,6 +332,54 @@ pub fn remove_guild(guild: u64) {
 #[cfg(test)]
 mod tracker_tests {
     use super::*;
+    #[test]
+    fn lifecycle_preserves_unavailable_and_removes_only_permanent_guild() {
+        let cache = crate::cache::GuildCache::new();
+        let now = Instant::now();
+        for guild in [91_001, 91_002] {
+            let config = serde_json::from_value(serde_json::json!({
+                "guild_id": guild.to_string(), "modules": {},
+                "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"
+            })).unwrap();
+            cache.set(guild.to_string(), config);
+            MESSAGE_TRACKER.lock().unwrap().record((guild, 7), now);
+            JOIN_TRACKER.lock().unwrap().record((guild, 0), now);
+        }
+        guild_deleted(&cache, 91_001, true);
+        for guild in [91_001, 91_002] {
+            assert!(cache.get(&guild.to_string()).is_some());
+            assert!(MESSAGE_TRACKER.lock().unwrap().entries.contains_key(&(guild, 7)));
+            assert!(JOIN_TRACKER.lock().unwrap().entries.contains_key(&(guild, 0)));
+        }
+        guild_deleted(&cache, 91_001, false);
+        assert!(cache.get("91001").is_none());
+        assert!(cache.get("91002").is_some());
+        for tracker in [&MESSAGE_TRACKER, &JOIN_TRACKER] {
+            let tracker = tracker.lock().unwrap();
+            assert!(!tracker.entries.keys().any(|(g, _)| *g == 91_001));
+            assert!(!tracker.sweep.iter().any(|(g, _)| *g == 91_001));
+            assert!(tracker.entries.keys().any(|(g, _)| *g == 91_002));
+        }
+        guild_deleted(&cache, 91_002, false);
+    }
+    #[test]
+    fn join_saturation_readmits_after_expiry_and_cleanup() {
+        let now = Instant::now();
+        let mut tracker = WindowTracker::new(2, MASS_JOIN_THRESHOLD, MASS_JOIN_INTERVAL);
+        tracker.record((1, 0), now);
+        tracker.record((2, 0), now);
+        for _ in 0..MASS_JOIN_THRESHOLD { assert!(!tracker.record((3, 0), now)); }
+        assert!(!tracker.entries.contains_key(&(3, 0)));
+        for _ in 1..MASS_JOIN_THRESHOLD - 1 { assert!(!tracker.record((1, 0), now)); }
+        assert!(tracker.record((1, 0), now));
+        tracker.prune(now + MASS_JOIN_INTERVAL, 1);
+        assert!(!tracker.record((3, 0), now + MASS_JOIN_INTERVAL));
+        assert!(tracker.entries.contains_key(&(3, 0)));
+        tracker.remove_guild(2);
+        assert!(!tracker.record((4, 0), now + MASS_JOIN_INTERVAL));
+        assert!(tracker.entries.contains_key(&(4, 0)));
+        assert_eq!(tracker.entries.len(), 2);
+    }
     #[test]
     fn message_keys_have_global_capacity() {
         let now = Instant::now();
