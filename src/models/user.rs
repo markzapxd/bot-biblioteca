@@ -24,6 +24,8 @@ pub struct UsernameEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AvatarEntry {
+    #[serde(default)]
+    pub guild_id: Option<String>,
     pub url: String,
     pub date: DateTime<Utc>,
 }
@@ -51,5 +53,19 @@ impl User {
 
     pub fn is_private_mode(&self) -> bool {
         self.is_private.unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod avatar_privacy_tests {
+    #[test]
+    fn avatar_provenance_survives_deserialization_and_legacy_json() {
+        let entries: Vec<super::AvatarEntry> = serde_json::from_value(serde_json::json!([
+            {"url":"global", "date":"2026-01-01T00:00:00Z"},
+            {"url":"private-a", "date":"2026-01-01T00:00:00Z", "guild_id":"1"}
+        ]))
+        .unwrap();
+        assert_eq!(serde_json::to_value(&entries).unwrap()[1]["guild_id"], "1");
+        assert_eq!(entries.len(), 2);
     }
 }

@@ -264,3 +264,199 @@ async fn allocated_epochs_survive_restart_deletion_and_legacy_manual() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires TASK6_DATABASE_URL disposable postgres"]
+async fn restore_failure_does_not_starve_and_success_is_not_retried() {
+    let pool = sqlx::PgPool::connect(&std::env::var("TASK6_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    bibliotecaria::database::run_migrations(&pool)
+        .await
+        .unwrap();
+    let store = Store::new(pool.clone());
+    store
+        .change(
+            81001,
+            Action::Manual(true),
+            vec![
+                ChannelSnapshot::new(1, vec![], vec![]),
+                ChannelSnapshot::new(2, vec![], vec![]),
+            ],
+            |_, _| async { Ok(()) },
+        )
+        .await
+        .unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let c = calls.clone();
+    assert!(store
+        .change(81001, Action::Manual(false), vec![], move |id, _| {
+            c.lock().unwrap().push(id);
+            async move {
+                if id == 1 {
+                    Err(BotError::Internal("transient".into()))
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await
+        .is_err());
+    assert_eq!(*calls.lock().unwrap(), vec![1, 2]);
+    let restarted = Store::new(pool);
+    restarted
+        .change(81001, Action::Manual(false), vec![], |id, _| async move {
+            assert_eq!(id, 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+async fn discord_failure(status: u16, code: i64) -> BotError {
+    let response = axum::http::Response::builder()
+        .status(status)
+        .body(format!(r#"{{"code":{code},"message":"injected"}}"#))
+        .unwrap();
+    let error =
+        serenity::http::ErrorResponse::from_response(response.into(), reqwest::Method::PATCH).await;
+    BotError::Discord(serenity::Error::Http(
+        serenity::http::HttpError::UnsuccessfulRequest(error),
+    ))
+}
+
+#[tokio::test]
+#[ignore = "requires TASK6_DATABASE_URL disposable postgres"]
+async fn deleted_channels_are_terminal_only_for_exact_unknown_channel() {
+    let pool = sqlx::PgPool::connect(&std::env::var("TASK6_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    bibliotecaria::database::run_migrations(&pool)
+        .await
+        .unwrap();
+    for (guild, status, code, terminal) in [
+        (82001, 404, 10003, true),
+        (82002, 404, 10004, false),
+        (82003, 403, 10003, false),
+        (82004, 500, 10003, false),
+    ] {
+        let store = Store::new(pool.clone());
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let c = calls.clone();
+        let result = store
+            .change(
+                guild,
+                Action::Manual(true),
+                vec![
+                    ChannelSnapshot::new(1, vec![], vec![]),
+                    ChannelSnapshot::new(2, vec![], vec![]),
+                ],
+                move |id, _| {
+                    c.lock().unwrap().push(id);
+                    async move {
+                        if id == 1 {
+                            Err(discord_failure(status, code).await)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                },
+            )
+            .await;
+        assert_eq!(result.is_ok(), terminal);
+        assert_eq!(*calls.lock().unwrap(), vec![1, 2]);
+        Store::new(pool.clone())
+            .change(
+                guild,
+                Action::Manual(false),
+                vec![],
+                move |id, _| async move {
+                    if terminal {
+                        assert_eq!(id, 2);
+                    }
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let store = Store::new(pool.clone());
+    store
+        .change(
+            82005,
+            Action::Manual(true),
+            vec![
+                ChannelSnapshot::new(1, vec![], vec![]),
+                ChannelSnapshot::new(2, vec![], vec![]),
+            ],
+            |_, _| async { Ok(()) },
+        )
+        .await
+        .unwrap();
+    store
+        .change(82005, Action::Manual(false), vec![], |id, _| async move {
+            if id == 1 {
+                Err(discord_failure(404, 10003).await)
+            } else {
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lockdown_snapshots WHERE guild_id='82005'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires TASK6_DATABASE_URL disposable postgres"]
+async fn stored_private_avatar_is_scoped_in_both_production_renderers() {
+    use bibliotecaria::{
+        repositories::user_repo::{self, HistoryKind},
+        services::{avatar_manager, history_manager},
+    };
+    let pool = sqlx::PgPool::connect(&std::env::var("TASK6_DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    bibliotecaria::database::run_migrations(&pool)
+        .await
+        .unwrap();
+    for (url, guild) in [
+        ("global", None),
+        ("secret-a", Some("1")),
+        ("local-b", Some("2")),
+    ] {
+        let mut entry = serde_json::json!({"url":url,"date":"2026-01-01T00:00:00Z"});
+        if let Some(guild) = guild {
+            entry["guild_id"] = guild.into();
+        }
+        user_repo::append_history(&pool, "final-avatar", HistoryKind::Avatar, entry)
+            .await
+            .unwrap();
+    }
+    user_repo::update_privacy(&pool, "final-avatar", true)
+        .await
+        .unwrap();
+    let user = user_repo::find_by_id(&pool, "final-avatar")
+        .await
+        .unwrap()
+        .unwrap();
+    let entries = user.get_avatar_history();
+    for guild in [None, Some(GuildId::new(2))] {
+        for page in 0..4 {
+            for embed in [
+                avatar_manager::build_avatar_page(1, &entries, page, guild).0,
+                history_manager::build_avatars_page(1, &entries, page, guild).0,
+            ] {
+                let rendered = serde_json::to_string(&embed).unwrap();
+                assert!(!rendered.contains("secret-a"));
+                if guild.is_none() {
+                    assert!(!rendered.contains("local-b"));
+                }
+            }
+        }
+    }
+}

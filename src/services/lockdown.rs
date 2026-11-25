@@ -239,12 +239,15 @@ impl Store {
         let active = record.manual || record.raid.is_some();
         record.restoring = !active;
         self.save(guild, &record).await?;
-        for i in 0..record.channels.len() {
+        let mut failure = None;
+        let mut i = 0;
+        while i < record.channels.len() {
             if active && record.channels[i].applied {
+                i += 1;
                 continue;
             }
             let ch = &record.channels[i];
-            effect(
+            let result = effect(
                 ch.id,
                 if active {
                     ch.locked.clone()
@@ -252,9 +255,30 @@ impl Store {
                     ch.original.clone()
                 },
             )
-            .await?;
-            record.channels[i].applied = active;
+            .await;
+            match result {
+                Ok(()) if active => {
+                    record.channels[i].applied = true;
+                    i += 1;
+                }
+                Ok(()) => {
+                    record.channels.remove(i);
+                }
+                Err(error) if unknown_channel(&error) => {
+                    record.channels.remove(i);
+                }
+                Err(error) => {
+                    if failure.is_none() {
+                        failure = Some(error);
+                    }
+                    i += 1;
+                    continue;
+                }
+            }
             self.save(guild, &record).await?;
+        }
+        if let Some(error) = failure {
+            return Err(error);
         }
         if !active {
             sqlx::query("DELETE FROM lockdown_snapshots WHERE guild_id=$1")
@@ -430,4 +454,11 @@ mod orchestration_tests {
         .await;
         assert!(*active.lock().unwrap());
     }
+}
+
+/// Only Discord's exact Unknown Channel response proves a snapshot is terminal.
+fn unknown_channel(error: &BotError) -> bool {
+    matches!(error, BotError::Discord(serenity::Error::Http(http))
+        if matches!(http, serenity::http::HttpError::UnsuccessfulRequest(response)
+            if response.status_code.as_u16() == 404 && response.error.code == 10003))
 }

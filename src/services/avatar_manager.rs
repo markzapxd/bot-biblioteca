@@ -36,7 +36,7 @@ pub async fn handle_avatar_history(
     };
 
     let history = user.get_avatar_history();
-    let (embed, rows) = build_avatar_page(user_id, &history, page);
+    let (embed, rows) = build_avatar_page(user_id, &history, page, interaction.guild_id);
 
     interaction
         .create_response(
@@ -57,7 +57,13 @@ pub fn build_avatar_page(
     user_id: u64,
     history: &[AvatarEntry],
     page: usize,
+    guild: Option<GuildId>,
 ) -> (CreateEmbed, Vec<CreateActionRow>) {
+    let guild = guild.map(|id| id.to_string());
+    let history: Vec<_> = history
+        .iter()
+        .filter(|entry| entry.guild_id.is_none() || entry.guild_id == guild)
+        .collect();
     let total_pages = if history.is_empty() { 1 } else { history.len() };
     let safe_page = page.min(total_pages.saturating_sub(1));
 
