@@ -21,22 +21,53 @@ const AUTO_LOCKDOWN: bool = true;
 const LOCKDOWN_DURATION: Duration = Duration::from_secs(300);
 const NEW_ACCOUNT_DAYS: i64 = 7;
 
-struct JoinEvent {
-    _user_id: u64,
-    guild_id: u64,
-    timestamp: Instant,
-}
+// Admission fails open for new keys at saturation: never attribute another
+// guild's traffic to a member. Existing keys continue to be checked.
+const MESSAGE_KEY_CAPACITY: usize = 10_000;
+const JOIN_KEY_CAPACITY: usize = 2_000;
+const PRUNE_BUDGET: usize = 256;
 
-struct RaidState {
-    active: bool,
-    generation: u64,
-    triggered_at: Instant,
-    auto_disable_at: Instant,
+struct WindowTracker {
+    entries: HashMap<(u64, u64), Vec<Instant>>,
+    sweep: std::collections::VecDeque<(u64, u64)>,
+    capacity: usize,
+    threshold: usize,
+    window: Duration,
 }
-
-static JOIN_TRACKER: Mutex<Vec<JoinEvent>> = Mutex::new(Vec::new());
-static MESSAGE_TRACKER: LazyLock<Mutex<HashMap<(u64, u64), Vec<Instant>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static RAID_STATUS: LazyLock<Mutex<HashMap<u64, RaidState>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+impl WindowTracker {
+    fn new(capacity: usize, threshold: usize, window: Duration) -> Self {
+        Self { entries: HashMap::new(), sweep: Default::default(), capacity, threshold, window }
+    }
+    fn record(&mut self, key: (u64, u64), now: Instant) -> bool {
+        if !self.entries.contains_key(&key) {
+            if self.entries.len() >= self.capacity { return false; }
+            self.sweep.push_back(key);
+            self.entries.insert(key, Vec::new());
+        }
+        let times = self.entries.get_mut(&key).unwrap();
+        times.retain(|t| now.saturating_duration_since(*t) < self.window);
+        if times.len() == self.threshold { times.remove(0); }
+        times.push(now);
+        times.len() == self.threshold
+    }
+    fn prune(&mut self, now: Instant, budget: usize) -> usize {
+        let work = budget.min(self.sweep.len());
+        for _ in 0..work {
+            let key = self.sweep.pop_front().unwrap();
+            let times = self.entries.get_mut(&key).unwrap();
+            times.retain(|t| now.saturating_duration_since(*t) < self.window);
+            if times.is_empty() { self.entries.remove(&key); }
+            else { self.sweep.push_back(key); }
+        }
+        work
+    }
+    fn remove_guild(&mut self, guild: u64) {
+        self.entries.retain(|(g, _), _| *g != guild);
+        self.sweep.retain(|(g, _)| *g != guild);
+    }
+}
+static JOIN_TRACKER: LazyLock<Mutex<WindowTracker>> = LazyLock::new(|| Mutex::new(WindowTracker::new(JOIN_KEY_CAPACITY, MASS_JOIN_THRESHOLD, MASS_JOIN_INTERVAL)));
+static MESSAGE_TRACKER: LazyLock<Mutex<WindowTracker>> = LazyLock::new(|| Mutex::new(WindowTracker::new(MESSAGE_KEY_CAPACITY, SPAM_THRESHOLD, SPAM_INTERVAL)));
 
 pub async fn detect_join_raid(ctx: &Context, member: &Member, guild_config: &Guild) -> Result<()> {
     if !guild_config.is_module_enabled("antiraid") {
@@ -44,17 +75,9 @@ pub async fn detect_join_raid(ctx: &Context, member: &Member, guild_config: &Gui
     }
 
     let now = Instant::now();
-    let user_id = member.user.id.get();
     let guild_id = member.guild_id.get();
-
-    let (should_trigger, recent_joins) = {
-        let mut tracker = JOIN_TRACKER.lock().unwrap();
-        tracker.retain(|e| now.duration_since(e.timestamp) < MASS_JOIN_INTERVAL);
-        tracker.push(JoinEvent { _user_id: user_id, guild_id, timestamp: now });
-
-        let count = tracker.iter().filter(|e| e.guild_id == guild_id).count();
-        (count >= MASS_JOIN_THRESHOLD, count)
-    };
+    let should_trigger = JOIN_TRACKER.lock().unwrap().record((guild_id, 0), now);
+    let recent_joins = MASS_JOIN_THRESHOLD;
 
     if should_trigger {
         let reason = format!("Mass join detected: {} joins in {:?}", recent_joins, MASS_JOIN_INTERVAL);
@@ -100,16 +123,9 @@ pub async fn detect_message_violation(ctx: &Context, message: &Message, guild_co
         return Ok(());
     }
 
-    let is_spam = {
-        let mut tracker = MESSAGE_TRACKER.lock().unwrap();
-        let timestamps = tracker.entry((message.guild_id.map(|g| g.get()).unwrap_or(0), user_id)).or_insert_with(Vec::new);
-        let now = Instant::now();
-        timestamps.retain(|t| now.duration_since(*t) < SPAM_INTERVAL);
-        if timestamps.len() >= SPAM_THRESHOLD { timestamps.remove(0); }
-        timestamps.push(now);
-
-        timestamps.len() >= SPAM_THRESHOLD
-    };
+    let is_spam = message.guild_id.map(|guild| {
+        MESSAGE_TRACKER.lock().unwrap().record((guild.get(), user_id), Instant::now())
+    }).unwrap_or(false);
 
     if is_spam {
         let reason = format!("Spam detected: {} messages in {:?}", SPAM_THRESHOLD, SPAM_INTERVAL);
@@ -162,11 +178,6 @@ pub async fn disable_raid_mode(ctx: &Context, guild_id: GuildId) -> Result<()> {
 
     Ok(())
     }).await
-}
-
-pub fn is_raid_active(guild_id: u64) -> bool {
-    let status = RAID_STATUS.lock().unwrap();
-    status.get(&guild_id).map_or(false, |s| s.active)
 }
 
 pub async fn punish_spam(ctx: &Context, member: &Member, reason: &str, guild_config: &Guild) -> Result<()> {
@@ -300,16 +311,52 @@ fn count_emojis(content: &str) -> usize {
 
 /// Called by the single lifecycle maintenance loop; no HTTP under these locks.
 pub fn prune_trackers(now: Instant) {
-    MESSAGE_TRACKER.lock().unwrap().retain(|_, timestamps| {
-        timestamps.retain(|t| now.saturating_duration_since(*t) < SPAM_INTERVAL);
-        !timestamps.is_empty()
-    });
-    JOIN_TRACKER.lock().unwrap().retain(|e| now.saturating_duration_since(e.timestamp) < MASS_JOIN_INTERVAL);
-    RAID_STATUS.lock().unwrap().retain(|_, s| s.active);
+    MESSAGE_TRACKER.lock().unwrap().prune(now, PRUNE_BUDGET);
+    JOIN_TRACKER.lock().unwrap().prune(now, PRUNE_BUDGET);
+    // Raid ownership lives only in the durable lockdown store, never in an
+    // evictable tracker. Recovery and generation checks remain there.
 }
 
 pub fn remove_guild(guild: u64) {
-    MESSAGE_TRACKER.lock().unwrap().retain(|(g, _), _| *g != guild);
-    JOIN_TRACKER.lock().unwrap().retain(|e| e.guild_id != guild);
-    RAID_STATUS.lock().unwrap().remove(&guild);
+    MESSAGE_TRACKER.lock().unwrap().remove_guild(guild);
+    JOIN_TRACKER.lock().unwrap().remove_guild(guild);
+}
+
+#[cfg(test)]
+mod tracker_tests {
+    use super::*;
+    #[test]
+    fn message_keys_have_global_capacity() {
+        let now = Instant::now();
+        let mut tracker = WindowTracker::new(2, SPAM_THRESHOLD, SPAM_INTERVAL);
+        tracker.record((1, 1), now);
+        tracker.record((2, 1), now);
+        assert!(!tracker.record((3, 1), now));
+        assert_eq!(tracker.entries.len(), 2);
+        for _ in 1..SPAM_THRESHOLD - 1 { assert!(!tracker.record((1, 1), now)); }
+        assert!(tracker.record((1, 1), now));
+        assert_eq!(tracker.entries[&(2, 1)].len(), 1);
+    }
+    #[test]
+    fn thresholds_isolation_expiry_and_bounded_prune() {
+        for (threshold, window) in [(SPAM_THRESHOLD, SPAM_INTERVAL), (MASS_JOIN_THRESHOLD, MASS_JOIN_INTERVAL)] {
+            let now = Instant::now();
+            let mut tracker = WindowTracker::new(4, threshold, window);
+            for _ in 0..threshold - 1 { assert!(!tracker.record((1, 9), now)); }
+            assert!(!tracker.record((2, 9), now));
+            assert!(tracker.record((1, 9), now));
+            for _ in 0..100 { assert!(tracker.record((1, 9), now)); }
+            assert_eq!(tracker.entries[&(1, 9)].len(), threshold);
+            assert!(!tracker.record((1, 9), now + window));
+            assert_eq!(tracker.prune(now + window, 1), 1);
+            assert_eq!(tracker.entries.len(), 2);
+            assert_eq!(tracker.prune(now + window, 1), 1);
+            assert_eq!(tracker.entries.len(), 1);
+            tracker.remove_guild(2);
+            assert!(tracker.entries.contains_key(&(1, 9)));
+            tracker.remove_guild(1);
+            assert!(tracker.entries.is_empty());
+            assert!(tracker.sweep.is_empty());
+        }
+    }
 }

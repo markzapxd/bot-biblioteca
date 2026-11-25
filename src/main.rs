@@ -125,13 +125,8 @@ async fn main() {
     }
 
     let guild_cache = Arc::new(cache::GuildCache::new());
-    match repositories::guild_repo::find_all(&pool).await {
-        Ok(guilds) => guild_cache.load_all(guilds),
-        Err(e) => {
-            tracing::error!("Failed to load guild configs: {}", e);
-            std::process::exit(1);
-        }
-    }
+    // Configurations are loaded on demand by guild-scoped handlers. Database
+    // history must not be treated as current gateway membership.
 
     let asset_manager = Arc::new(asset_manager::AssetManager::new());
 
