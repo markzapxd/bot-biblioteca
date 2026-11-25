@@ -1,10 +1,10 @@
-use serenity::all::*;
-use sqlx::PgPool;
 use crate::cache::GuildCache;
 use crate::errors::Result;
 use crate::permissions;
 use crate::repositories::guild_repo;
 use crate::theme;
+use serenity::all::*;
+use sqlx::PgPool;
 
 pub fn register(commands: &mut Vec<CreateCommand>) {
     commands.push(
@@ -14,38 +14,77 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
     );
 }
 
-pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, guild_cache: &GuildCache) -> Result<()> {
-    let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+pub async fn handle(
+    ctx: &Context,
+    interaction: &CommandInteraction,
+    _pool: &PgPool,
+    guild_cache: &GuildCache,
+) -> Result<()> {
+    let guild_id = interaction
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
 
     let guild_id_str = guild_id.to_string();
-    let config = guild_cache.get(&guild_id_str).ok_or(crate::errors::BotError::NotFound("Guild config not found".into()))?;
-    permissions::authorize(ctx, guild_id, interaction.user.id, permissions::Action::Configure, None).await?;
+    let config = guild_cache
+        .get(&guild_id_str)
+        .ok_or(crate::errors::BotError::NotFound(
+            "Guild config not found".into(),
+        ))?;
+    permissions::authorize(
+        ctx,
+        guild_id,
+        interaction.user.id,
+        permissions::Action::Configure,
+        None,
+    )
+    .await?;
     let modules = config.get_modules();
 
     let embed = build_logs_embed(&config, &modules);
     let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "default", embed).await;
     let rows = build_logs_components(&config, &modules);
 
-    let mut msg = CreateInteractionResponseMessage::new().embed(embed).components(rows);
+    let mut msg = CreateInteractionResponseMessage::new()
+        .embed(embed)
+        .components(rows);
     if let Some(file) = attachment {
         msg = msg.add_file(file);
     }
-    interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
+    interaction
+        .create_response(ctx, CreateInteractionResponse::Message(msg))
+        .await?;
     Ok(())
 }
 
-pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool: &PgPool, guild_cache: &GuildCache) -> Result<()> {
-    let guild_id = component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+pub async fn handle_toggle(
+    ctx: &Context,
+    component: &ComponentInteraction,
+    pool: &PgPool,
+    guild_cache: &GuildCache,
+) -> Result<()> {
+    let guild_id = component
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let guild_id_str = guild_id.to_string();
 
-    let config = guild_cache.get(&guild_id_str).ok_or(crate::errors::BotError::NotFound("Guild config not found".into()))?;
+    let config = guild_cache
+        .get(&guild_id_str)
+        .ok_or(crate::errors::BotError::NotFound(
+            "Guild config not found".into(),
+        ))?;
     let mut modules = config.get_modules();
 
     let selected_value = match &component.data.kind {
         ComponentInteractionDataKind::StringSelect { values } => {
-            values.first().ok_or_else(|| crate::errors::BotError::Validation("Nenhuma opção selecionada".into()))?
+            values.first().ok_or_else(|| {
+                crate::errors::BotError::Validation("Nenhuma opção selecionada".into())
+            })?
         }
-        _ => return Err(crate::errors::BotError::Validation("Tipo de componente inválido".into())),
+        _ => {
+            return Err(crate::errors::BotError::Validation(
+                "Tipo de componente inválido".into(),
+            ))
+        }
     };
 
     match selected_value.as_str() {
@@ -55,13 +94,16 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
         "log_messages" => modules.log_messages = !modules.log_messages,
         "log_avatars" => modules.log_avatars = !modules.log_avatars,
         "log_names" => modules.log_names = !modules.log_names,
-        _ => return Err(crate::errors::BotError::Validation("Configuração desconhecida".into())),
+        _ => {
+            return Err(crate::errors::BotError::Validation(
+                "Configuração desconhecida".into(),
+            ))
+        }
     }
 
     let modules_json = serde_json::to_value(&modules)?;
     guild_repo::update_modules(pool, &guild_id_str, modules_json.clone()).await?;
 
-    
     let mut updated_config = config.clone();
     updated_config.modules = modules_json;
     guild_cache.set(guild_id_str, updated_config.clone());
@@ -70,29 +112,53 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "default", embed).await;
     let rows = build_logs_components(&updated_config, &modules);
 
-    let mut msg = CreateInteractionResponseMessage::new().embed(embed).components(rows);
+    let mut msg = CreateInteractionResponseMessage::new()
+        .embed(embed)
+        .components(rows);
     if let Some(file) = attachment {
         msg = msg.add_file(file);
     }
-    component.create_response(&ctx, CreateInteractionResponse::UpdateMessage(msg)).await?;
+    component
+        .create_response(&ctx, CreateInteractionResponse::UpdateMessage(msg))
+        .await?;
     Ok(())
 }
 
-pub async fn handle_create_channel(ctx: &Context, component: &ComponentInteraction, pool: &PgPool, guild_cache: &GuildCache) -> Result<()> {
-    let guild_id = component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+pub async fn handle_create_channel(
+    ctx: &Context,
+    component: &ComponentInteraction,
+    pool: &PgPool,
+    guild_cache: &GuildCache,
+) -> Result<()> {
+    let guild_id = component
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let guild_id_str = guild_id.to_string();
 
-    let config = guild_cache.get(&guild_id_str).ok_or(crate::errors::BotError::NotFound("Guild config not found".into()))?;
+    let config = guild_cache
+        .get(&guild_id_str)
+        .ok_or(crate::errors::BotError::NotFound(
+            "Guild config not found".into(),
+        ))?;
 
-    component.create_response(&ctx, CreateInteractionResponse::Defer(
-        CreateInteractionResponseMessage::new().ephemeral(true)
-    )).await?;
+    component
+        .create_response(
+            &ctx,
+            CreateInteractionResponse::Defer(
+                CreateInteractionResponseMessage::new().ephemeral(true),
+            ),
+        )
+        .await?;
 
-    let admin_role_id = config.admin_role_id.as_ref()
+    let admin_role_id = config
+        .admin_role_id
+        .as_ref()
         .and_then(|s| s.parse::<u64>().ok())
         .map(RoleId::new);
 
-    let staff_role_id = config.staff_role_id.as_ref()
+    let staff_role_id = config
+        .staff_role_id
+        .as_ref()
         .and_then(|s| s.parse::<u64>().ok())
         .map(RoleId::new);
 
@@ -111,35 +177,42 @@ pub async fn handle_create_channel(ctx: &Context, component: &ComponentInteracti
     }
 
     if existing_channel.is_none() {
-        if let Some(ch) = channels.values().find(|ch| ch.name == "logs" && ch.kind == ChannelType::Text) {
+        if let Some(ch) = channels
+            .values()
+            .find(|ch| ch.name == "logs" && ch.kind == ChannelType::Text)
+        {
             existing_channel = Some(ch.clone());
         }
     }
 
     let mut channel = match existing_channel {
         Some(ch) => ch,
-        None => guild_id.create_channel(&ctx, CreateChannel::new("logs").kind(ChannelType::Text)).await?,
+        None => {
+            guild_id
+                .create_channel(&ctx, CreateChannel::new("logs").kind(ChannelType::Text))
+                .await?
+        }
     };
 
     let mut overwrites = Vec::new();
 
-    
     overwrites.push(PermissionOverwrite {
         kind: PermissionOverwriteType::Role(everyone_role_id),
         allow: Permissions::empty(),
         deny: Permissions::VIEW_CHANNEL,
     });
 
-    
     if let Some(admin_rid) = admin_role_id {
         overwrites.push(PermissionOverwrite {
             kind: PermissionOverwriteType::Role(admin_rid),
-            allow: Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES | Permissions::READ_MESSAGE_HISTORY | Permissions::MANAGE_MESSAGES,
+            allow: Permissions::VIEW_CHANNEL
+                | Permissions::SEND_MESSAGES
+                | Permissions::READ_MESSAGE_HISTORY
+                | Permissions::MANAGE_MESSAGES,
             deny: Permissions::empty(),
         });
     }
 
-    
     if let Some(staff_rid) = staff_role_id {
         overwrites.push(PermissionOverwrite {
             kind: PermissionOverwriteType::Role(staff_rid),
@@ -148,14 +221,21 @@ pub async fn handle_create_channel(ctx: &Context, component: &ComponentInteracti
         });
     }
 
-    if let Err(e) = channel.edit(&ctx.http, EditChannel::new().permissions(overwrites)).await {
+    if let Err(e) = channel
+        .edit(&ctx.http, EditChannel::new().permissions(overwrites))
+        .await
+    {
         tracing::error!("Erro ao configurar permissões do canal de logs: {}", e);
     }
 
-    
-    guild_repo::update_field(pool, &guild_id_str, "log_channel_id", &channel.id.to_string()).await?;
+    guild_repo::update_field(
+        pool,
+        &guild_id_str,
+        "log_channel_id",
+        &channel.id.to_string(),
+    )
+    .await?;
 
-    
     let mut updated_config = config.clone();
     updated_config.log_channel_id = Some(channel.id.to_string());
     guild_cache.set(guild_id_str, updated_config.clone());
@@ -173,19 +253,46 @@ pub async fn handle_create_channel(ctx: &Context, component: &ComponentInteracti
     Ok(())
 }
 
-fn build_logs_embed(config: &crate::models::Guild, modules: &crate::models::guild::GuildModules) -> CreateEmbed {
+fn build_logs_embed(
+    config: &crate::models::Guild,
+    modules: &crate::models::guild::GuildModules,
+) -> CreateEmbed {
     let mut desc = String::new();
 
     if let Some(log_channel_id) = &config.log_channel_id {
         desc.push_str(&format!("**Canal de Logs**: <#{}>\n\n", log_channel_id));
         desc.push_str("Selecione uma opção no menu abaixo para ativar ou desativar uma função de log específica.\n\n");
 
-        let status_calls = if modules.log_calls { "**Ativo**" } else { "Desativado" };
-        let status_joins = if modules.log_joins_leaves { "**Ativo**" } else { "Desativado" };
-        let status_roles = if modules.log_roles { "**Ativo**" } else { "Desativado" };
-        let status_messages = if modules.log_messages { "**Ativo**" } else { "Desativado" };
-        let status_avatars = if modules.log_avatars { "**Ativo**" } else { "Desativado" };
-        let status_names = if modules.log_names { "**Ativo**" } else { "Desativado" };
+        let status_calls = if modules.log_calls {
+            "**Ativo**"
+        } else {
+            "Desativado"
+        };
+        let status_joins = if modules.log_joins_leaves {
+            "**Ativo**"
+        } else {
+            "Desativado"
+        };
+        let status_roles = if modules.log_roles {
+            "**Ativo**"
+        } else {
+            "Desativado"
+        };
+        let status_messages = if modules.log_messages {
+            "**Ativo**"
+        } else {
+            "Desativado"
+        };
+        let status_avatars = if modules.log_avatars {
+            "**Ativo**"
+        } else {
+            "Desativado"
+        };
+        let status_names = if modules.log_names {
+            "**Ativo**"
+        } else {
+            "Desativado"
+        };
 
         desc.push_str(&format!("Logs de Call: {}\n", status_calls));
         desc.push_str(&format!("Logs de Entradas/Saídas: {}\n", status_joins));
@@ -195,18 +302,24 @@ fn build_logs_embed(config: &crate::models::Guild, modules: &crate::models::guil
         desc.push_str(&format!("Logs de Nomes: {}\n", status_names));
     } else {
         desc.push_str("Canal de Logs Não Configurado\n");
-        desc.push_str("Nenhuma mensagem de log será enviada até que o canal de logs seja configurado.\n\n");
-        desc.push_str("Clique no botão abaixo para criar e configurar o canal de logs automaticamente.");
+        desc.push_str(
+            "Nenhuma mensagem de log será enviada até que o canal de logs seja configurado.\n\n",
+        );
+        desc.push_str(
+            "Clique no botão abaixo para criar e configurar o canal de logs automaticamente.",
+        );
     }
 
     theme::info("Painel de Logs", &desc)
 }
 
-fn build_logs_components(config: &crate::models::Guild, _modules: &crate::models::guild::GuildModules) -> Vec<CreateActionRow> {
+fn build_logs_components(
+    config: &crate::models::Guild,
+    _modules: &crate::models::guild::GuildModules,
+) -> Vec<CreateActionRow> {
     let mut rows = Vec::new();
 
     if config.log_channel_id.is_some() {
-        
         let options = vec![
             CreateSelectMenuOption::new("Logs de Call", "log_calls")
                 .description("Registra entradas/saídas em canais de voz"),
@@ -219,28 +332,25 @@ fn build_logs_components(config: &crate::models::Guild, _modules: &crate::models
             CreateSelectMenuOption::new("Logs de Avatares", "log_avatars")
                 .description("Registra alterações de foto de perfil"),
             CreateSelectMenuOption::new("Logs de Nomes", "log_names")
-                .description("Registra alterações de username e apelido")
+                .description("Registra alterações de username e apelido"),
         ];
 
         rows.push(CreateActionRow::SelectMenu(
-            CreateSelectMenu::new(
-                "logs_select_menu",
-                CreateSelectMenuKind::String { options },
-            )
-            .placeholder("Selecione um log para alterar"),
+            CreateSelectMenu::new("logs_select_menu", CreateSelectMenuKind::String { options })
+                .placeholder("Selecione um log para alterar"),
         ));
 
-        rows.push(CreateActionRow::Buttons(vec![
-            CreateButton::new("logs_create_channel")
-                .label("Recriar Canal de Logs")
-                .style(ButtonStyle::Secondary)
-        ]));
+        rows.push(CreateActionRow::Buttons(vec![CreateButton::new(
+            "logs_create_channel",
+        )
+        .label("Recriar Canal de Logs")
+        .style(ButtonStyle::Secondary)]));
     } else {
-        rows.push(CreateActionRow::Buttons(vec![
-            CreateButton::new("logs_create_channel")
-                .label("Criar Canal de Logs")
-                .style(ButtonStyle::Secondary)
-        ]));
+        rows.push(CreateActionRow::Buttons(vec![CreateButton::new(
+            "logs_create_channel",
+        )
+        .label("Criar Canal de Logs")
+        .style(ButtonStyle::Secondary)]));
     }
 
     rows

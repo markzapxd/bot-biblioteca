@@ -1,10 +1,10 @@
-use serenity::all::*;
-use sqlx::PgPool;
 use crate::cache::GuildCache;
 use crate::errors::Result;
 use crate::permissions;
 use crate::repositories::guild_repo;
 use crate::theme;
+use serenity::all::*;
+use sqlx::PgPool;
 
 const MODULES: &[(&str, &str)] = &[
     ("antiraid", "Anti-Raid"),
@@ -22,34 +22,70 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
     );
 }
 
-pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, guild_cache: &GuildCache) -> Result<()> {
-    let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+pub async fn handle(
+    ctx: &Context,
+    interaction: &CommandInteraction,
+    _pool: &PgPool,
+    guild_cache: &GuildCache,
+) -> Result<()> {
+    let guild_id = interaction
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
 
     let guild_id_str = guild_id.to_string();
-    let config = guild_cache.get(&guild_id_str).ok_or(crate::errors::BotError::NotFound("Guild config not found".into()))?;
-    permissions::authorize(ctx, guild_id, interaction.user.id, permissions::Action::Configure, None).await?;
+    let config = guild_cache
+        .get(&guild_id_str)
+        .ok_or(crate::errors::BotError::NotFound(
+            "Guild config not found".into(),
+        ))?;
+    permissions::authorize(
+        ctx,
+        guild_id,
+        interaction.user.id,
+        permissions::Action::Configure,
+        None,
+    )
+    .await?;
     let modules = config.get_modules();
 
     let embed = build_modules_embed(&modules);
     let (embed, attachment) = crate::asset_manager::prepare_embed(ctx, "modules", embed).await;
     let row = build_modules_row(&modules);
 
-    let mut msg = CreateInteractionResponseMessage::new().embed(embed).components(vec![row]);
+    let mut msg = CreateInteractionResponseMessage::new()
+        .embed(embed)
+        .components(vec![row]);
     if let Some(file) = attachment {
         msg = msg.add_file(file);
     }
-    interaction.create_response(ctx, CreateInteractionResponse::Message(msg)).await?;
+    interaction
+        .create_response(ctx, CreateInteractionResponse::Message(msg))
+        .await?;
     Ok(())
 }
 
-pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool: &PgPool, guild_cache: &GuildCache) -> Result<()> {
-    let guild_id = component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+pub async fn handle_toggle(
+    ctx: &Context,
+    component: &ComponentInteraction,
+    pool: &PgPool,
+    guild_cache: &GuildCache,
+) -> Result<()> {
+    let guild_id = component
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let guild_id_str = guild_id.to_string();
 
-    let module_name = component.data.custom_id.strip_prefix("modules_toggle_")
+    let module_name = component
+        .data
+        .custom_id
+        .strip_prefix("modules_toggle_")
         .ok_or_else(|| crate::errors::BotError::Validation("Invalid custom id".into()))?;
 
-    let config = guild_cache.get(&guild_id_str).ok_or(crate::errors::BotError::NotFound("Guild config not found".into()))?;
+    let config = guild_cache
+        .get(&guild_id_str)
+        .ok_or(crate::errors::BotError::NotFound(
+            "Guild config not found".into(),
+        ))?;
     let mut modules = config.get_modules();
 
     match module_name {
@@ -64,7 +100,6 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
     let modules_json = serde_json::to_value(&modules)?;
     guild_repo::update_modules(pool, &guild_id_str, modules_json.clone()).await?;
 
-    
     let mut updated_config = config.clone();
     updated_config.modules = modules_json;
     guild_cache.set(guild_id_str, updated_config);
@@ -73,11 +108,15 @@ pub async fn handle_toggle(ctx: &Context, component: &ComponentInteraction, pool
     let (embed, attachment) = crate::asset_manager::prepare_embed(&ctx, "modules", embed).await;
     let row = build_modules_row(&modules);
 
-    let mut msg = CreateInteractionResponseMessage::new().embed(embed).components(vec![row]);
+    let mut msg = CreateInteractionResponseMessage::new()
+        .embed(embed)
+        .components(vec![row]);
     if let Some(file) = attachment {
         msg = msg.add_file(file);
     }
-    component.create_response(&ctx, CreateInteractionResponse::UpdateMessage(msg)).await?;
+    component
+        .create_response(&ctx, CreateInteractionResponse::UpdateMessage(msg))
+        .await?;
     Ok(())
 }
 
@@ -99,10 +138,13 @@ fn build_modules_embed(modules: &crate::models::guild::GuildModules) -> CreateEm
 }
 
 fn build_modules_row(_modules: &crate::models::guild::GuildModules) -> CreateActionRow {
-    let buttons: Vec<CreateButton> = MODULES.iter().map(|(name, label)| {
-        CreateButton::new(format!("modules_toggle_{}", name))
-            .label(*label)
-            .style(ButtonStyle::Secondary)
-    }).collect();
+    let buttons: Vec<CreateButton> = MODULES
+        .iter()
+        .map(|(name, label)| {
+            CreateButton::new(format!("modules_toggle_{}", name))
+                .label(*label)
+                .style(ButtonStyle::Secondary)
+        })
+        .collect();
     CreateActionRow::Buttons(buttons)
 }

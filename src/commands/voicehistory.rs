@@ -10,7 +10,10 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
     commands.push(
         CreateCommand::new("voicehistory")
             .description("Voice session history of a user")
-            .add_option(CreateCommandOption::new(CommandOptionType::User, "user", "Target user").required(true)),
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::User, "user", "Target user")
+                    .required(true),
+            ),
     );
 }
 
@@ -37,29 +40,69 @@ fn format_timestamp(ts: DateTime<Utc>) -> String {
     }
 }
 
-pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
-    let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
-    let target = interaction.data.options.iter().find(|o| o.name == "user").and_then(|o| o.value.as_user_id()).ok_or(BotError::Validation("User required".into()))?;
+pub async fn handle(
+    ctx: &Context,
+    interaction: &CommandInteraction,
+    pool: &PgPool,
+    _guild_cache: &GuildCache,
+) -> Result<()> {
+    let guild_id = interaction
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+    let target = interaction
+        .data
+        .options
+        .iter()
+        .find(|o| o.name == "user")
+        .and_then(|o| o.value.as_user_id())
+        .ok_or(BotError::Validation("User required".into()))?;
     let profile = crate::repositories::user_repo::find_by_id(pool, &target.to_string()).await?;
-    if !crate::permissions::can_view_profile(ctx, Some(guild_id), interaction.user.id, target.get(), profile.map_or(true, |u| u.is_private_mode())).await {
-        interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content("Este perfil é privado.").ephemeral(true))).await?;
+    if !crate::permissions::can_view_profile(
+        ctx,
+        Some(guild_id),
+        interaction.user.id,
+        target.get(),
+        profile.is_none_or(|u| u.is_private_mode()),
+    )
+    .await
+    {
+        interaction
+            .create_response(
+                ctx,
+                CreateInteractionResponse::Message(
+                    CreateInteractionResponseMessage::new()
+                        .content("Este perfil é privado.")
+                        .ephemeral(true),
+                ),
+            )
+            .await?;
         return Ok(());
     }
     let user_id_str = target.to_string();
 
+    let sessions =
+        voice_session_repo::find_by_user_guild(pool, &user_id_str, &guild_id.to_string(), 20)
+            .await?;
 
-    let sessions = voice_session_repo::find_by_user_guild(pool, &user_id_str, &guild_id.to_string(), 20).await?;
-
-    let sessions = crate::permissions::visible_voice_sessions(ctx, guild_id, interaction.user.id, sessions).await?;
+    let sessions =
+        crate::permissions::visible_voice_sessions(ctx, guild_id, interaction.user.id, sessions)
+            .await?;
     let total_sessions = sessions.len() as i64;
     let total_duration_ms: i64 = sessions.iter().map(|s| s.duration.unwrap_or(0)).sum();
     if sessions.is_empty() {
         let content = format!(
             "Voice History\n\nTotal Sessions: 0\nTotal Voice Time: 0m\nLast Activity: --\n\nNo voice sessions recorded."
         );
-        interaction.create_response(ctx, CreateInteractionResponse::Message(
-            CreateInteractionResponseMessage::new().content(content).ephemeral(true)
-        )).await?;
+        interaction
+            .create_response(
+                ctx,
+                CreateInteractionResponse::Message(
+                    CreateInteractionResponseMessage::new()
+                        .content(content)
+                        .ephemeral(true),
+                ),
+            )
+            .await?;
         return Ok(());
     }
 
@@ -72,7 +115,9 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
         .iter()
         .map(|s| {
             let end_time = s.left_at.unwrap_or_else(Utc::now);
-            let duration_ms = s.duration.unwrap_or_else(|| (end_time - s.joined_at).num_milliseconds());
+            let duration_ms = s
+                .duration
+                .unwrap_or_else(|| (end_time - s.joined_at).num_milliseconds());
             (
                 s.channel_name.clone(),
                 format_duration(duration_ms),
@@ -81,14 +126,31 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
         })
         .collect();
 
-    let channel_width = rows.iter().map(|r| r.0.len()).max().unwrap_or(0).max("Channel".len());
-    let duration_width = rows.iter().map(|r| r.1.len()).max().unwrap_or(0).max("Duration".len());
-    let ended_width = rows.iter().map(|r| r.2.len()).max().unwrap_or(0).max("Ended".len());
+    let channel_width = rows
+        .iter()
+        .map(|r| r.0.len())
+        .max()
+        .unwrap_or(0)
+        .max("Channel".len());
+    let duration_width = rows
+        .iter()
+        .map(|r| r.1.len())
+        .max()
+        .unwrap_or(0)
+        .max("Duration".len());
+    let ended_width = rows
+        .iter()
+        .map(|r| r.2.len())
+        .max()
+        .unwrap_or(0)
+        .max("Ended".len());
 
     let mut table = String::new();
     table.push_str(&format!(
         "{:<cw$}  {:>dw$}  {:<ew$}\n",
-        "Channel", "Duration", "Ended",
+        "Channel",
+        "Duration",
+        "Ended",
         cw = channel_width,
         dw = duration_width,
         ew = ended_width,
@@ -99,7 +161,9 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     for (channel, duration, ended) in rows {
         table.push_str(&format!(
             "{:<cw$}  {:>dw$}  {:<ew$}\n",
-            channel, duration, ended,
+            channel,
+            duration,
+            ended,
             cw = channel_width,
             dw = duration_width,
             ew = ended_width,
@@ -115,9 +179,16 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
         sessions.len(),
     );
 
-    interaction.create_response(ctx, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new().content(content).ephemeral(true)
-    )).await?;
+    interaction
+        .create_response(
+            ctx,
+            CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                    .content(content)
+                    .ephemeral(true),
+            ),
+        )
+        .await?;
 
     Ok(())
 }

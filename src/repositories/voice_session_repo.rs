@@ -15,11 +15,20 @@ pub async fn transition(
 ) -> Result<Option<VoiceSession>> {
     let mut tx = pool.begin().await?;
     sqlx::query("INSERT INTO users(user_id) VALUES ($1) ON CONFLICT DO NOTHING")
-        .bind(user_id).execute(&mut *tx).await?;
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("SELECT user_id FROM users WHERE user_id=$1 FOR UPDATE")
-        .bind(user_id).execute(&mut *tx).await?;
-    let active = sqlx::query_as::<_, VoiceSession>("SELECT * FROM voice_sessions WHERE user_id=$1 AND guild_id=$2 AND active FOR UPDATE")
-        .bind(user_id).bind(guild_id).fetch_optional(&mut *tx).await?;
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    let active = sqlx::query_as::<_, VoiceSession>(
+        "SELECT * FROM voice_sessions WHERE user_id=$1 AND guild_id=$2 AND active FOR UPDATE",
+    )
+    .bind(user_id)
+    .bind(guild_id)
+    .fetch_optional(&mut *tx)
+    .await?;
     if active.as_ref().map(|s| s.channel_id.as_str()) == destination.map(|d| d.0) {
         tx.commit().await?;
         return Ok(active);
@@ -31,7 +40,9 @@ pub async fn transition(
     let session = if let Some((channel_id, channel_name)) = destination {
         Some(sqlx::query_as::<_, VoiceSession>("INSERT INTO voice_sessions(user_id,guild_id,guild_name,channel_id,channel_name,joined_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *")
             .bind(user_id).bind(guild_id).bind(guild_name).bind(channel_id).bind(channel_name).bind(now).fetch_one(&mut *tx).await?)
-    } else { None };
+    } else {
+        None
+    };
     sqlx::query("UPDATE users SET total_voice_time=COALESCE((SELECT SUM(duration) FROM voice_sessions WHERE user_id=$1),0), last_seen=$2, updated_at=$2 WHERE user_id=$1")
         .bind(user_id).bind(now).execute(&mut *tx).await?;
     tx.commit().await?;
@@ -176,7 +187,12 @@ pub async fn find_by_guild_with_duration(
     Ok(sessions)
 }
 
-pub async fn find_by_user_guild(pool: &PgPool, user_id: &str, guild_id: &str, limit: i64) -> Result<Vec<VoiceSession>> {
+pub async fn find_by_user_guild(
+    pool: &PgPool,
+    user_id: &str,
+    guild_id: &str,
+    limit: i64,
+) -> Result<Vec<VoiceSession>> {
     Ok(sqlx::query_as::<_, VoiceSession>("SELECT * FROM voice_sessions WHERE user_id = $1 AND guild_id = $2 ORDER BY joined_at DESC LIMIT $3")
         .bind(user_id).bind(guild_id).bind(limit).fetch_all(pool).await?)
 }

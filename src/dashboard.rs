@@ -22,10 +22,18 @@ pub struct DashboardState {
 }
 
 pub fn create_router(state: DashboardState) -> Router {
-    create_router_with_auth(state, crate::dashboard_auth::DashboardAuth::from_env().ok().flatten())
+    create_router_with_auth(
+        state,
+        crate::dashboard_auth::DashboardAuth::from_env()
+            .ok()
+            .flatten(),
+    )
 }
 
-pub fn create_router_with_auth(state: DashboardState, auth: Option<crate::dashboard_auth::DashboardAuth>) -> Router {
+pub fn create_router_with_auth(
+    state: DashboardState,
+    auth: Option<crate::dashboard_auth::DashboardAuth>,
+) -> Router {
     let private = Router::new()
         .route("/api/stats", get(get_stats))
         .route("/api/guilds", get(get_guilds))
@@ -42,11 +50,18 @@ async fn health() -> &'static str {
 }
 
 async fn get_stats(State(state): State<DashboardState>) -> Result<Json<StatsResponse>> {
-    let guilds = state.http.get_guilds(None, Some(200)).await.map_err(BotError::Discord)?.len();
+    let guilds = state
+        .http
+        .get_guilds(None, Some(200))
+        .await
+        .map_err(BotError::Discord)?
+        .len();
     let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(&state.pool)
         .await?;
-    let uptime_ms = Utc::now().signed_duration_since(state.start_time).num_milliseconds();
+    let uptime_ms = Utc::now()
+        .signed_duration_since(state.start_time)
+        .num_milliseconds();
     let uptime = format_duration(uptime_ms);
 
     Ok(Json(StatsResponse {
@@ -58,12 +73,19 @@ async fn get_stats(State(state): State<DashboardState>) -> Result<Json<StatsResp
 }
 
 async fn get_guilds(State(state): State<DashboardState>) -> Result<Json<Vec<GuildInfo>>> {
-    let guilds = state.http.get_guilds(None, Some(200)).await.map_err(BotError::Discord)?;
-    let infos: Vec<GuildInfo> = guilds.into_iter().map(|g| GuildInfo {
-        id: g.id.to_string(),
-        name: g.name,
-        icon: g.icon.map(|i| i.to_string()),
-    }).collect();
+    let guilds = state
+        .http
+        .get_guilds(None, Some(200))
+        .await
+        .map_err(BotError::Discord)?;
+    let infos: Vec<GuildInfo> = guilds
+        .into_iter()
+        .map(|g| GuildInfo {
+            id: g.id.to_string(),
+            name: g.name,
+            icon: g.icon.map(|i| i.to_string()),
+        })
+        .collect();
     Ok(Json(infos))
 }
 
@@ -74,7 +96,8 @@ async fn get_config(
     if let Some(guild) = state.guild_cache.get(&guild_id) {
         return Ok(Json(guild));
     }
-    let guild = guild_repo::find_by_id(&state.pool, &guild_id).await?
+    let guild = guild_repo::find_by_id(&state.pool, &guild_id)
+        .await?
         .ok_or(BotError::NotFound("Guild not found".into()))?;
     Ok(Json(guild))
 }
@@ -111,10 +134,15 @@ async fn send_message(
     State(state): State<DashboardState>,
     Json(body): Json<SendMessage>,
 ) -> Result<Json<serde_json::Value>> {
-    let channel_id = body.channel_id.parse::<u64>()
+    let channel_id = body
+        .channel_id
+        .parse::<u64>()
         .map_err(|_| BotError::Validation("Invalid channel ID".into()))?;
     let map = json!({ "content": body.content });
-    state.http.send_message(ChannelId::new(channel_id), vec![], &map).await
+    state
+        .http
+        .send_message(ChannelId::new(channel_id), vec![], &map)
+        .await
         .map_err(BotError::Discord)?;
     Ok(Json(json!({ "success": true })))
 }
@@ -123,12 +151,17 @@ async fn create_role(
     State(state): State<DashboardState>,
     Json(body): Json<CreateRole>,
 ) -> Result<Json<serde_json::Value>> {
-    let guild_id = body.guild_id.parse::<u64>()
+    let guild_id = body
+        .guild_id
+        .parse::<u64>()
         .map_err(|_| BotError::Validation("Invalid guild ID".into()))?;
     let color = u64::from_str_radix(body.color.trim_start_matches('#'), 16)
         .map_err(|_| BotError::Validation("Invalid color".into()))?;
     let map = json!({ "name": body.name, "color": color });
-    let role = state.http.create_role(GuildId::new(guild_id), &map, None).await
+    let role = state
+        .http
+        .create_role(GuildId::new(guild_id), &map, None)
+        .await
         .map_err(BotError::Discord)?;
     Ok(Json(json!({
         "success": true,
@@ -140,15 +173,22 @@ async fn get_messages(
     State(state): State<DashboardState>,
     Path(channel_id): Path<String>,
 ) -> Result<Json<Vec<MessageInfo>>> {
-    let channel_id_num = channel_id.parse::<u64>()
+    let channel_id_num = channel_id
+        .parse::<u64>()
         .map_err(|_| BotError::Validation("Invalid channel ID".into()))?;
-    let messages = state.http.get_messages(ChannelId::new(channel_id_num), None, Some(50)).await
+    let messages = state
+        .http
+        .get_messages(ChannelId::new(channel_id_num), None, Some(50))
+        .await
         .map_err(BotError::Discord)?;
-    let infos: Vec<MessageInfo> = messages.into_iter().map(|m| MessageInfo {
-        author: m.author.name,
-        content: m.content,
-        timestamp: m.timestamp.unix_timestamp(),
-        bot: m.author.bot,
-    }).collect();
+    let infos: Vec<MessageInfo> = messages
+        .into_iter()
+        .map(|m| MessageInfo {
+            author: m.author.name,
+            content: m.content,
+            timestamp: m.timestamp.unix_timestamp(),
+            bot: m.author.bot,
+        })
+        .collect();
     Ok(Json(infos))
 }

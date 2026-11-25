@@ -20,7 +20,8 @@ pub async fn build_user_info(
     is_staff: bool,
     pool: &PgPool,
 ) -> Result<UserInfoResult> {
-    let user = crate::repositories::user_repo::find_or_create(pool, &target_user.id.to_string()).await?;
+    let user =
+        crate::repositories::user_repo::find_or_create(pool, &target_user.id.to_string()).await?;
 
     let is_self = target_user.id.get() == interaction_user_id;
     let is_private = user.is_private_mode();
@@ -49,17 +50,28 @@ pub async fn build_user_info(
         None
     };
 
-
     let embed = {
         let mut e = CreateEmbed::new()
             .title(format!("Ficha de {}", target_user.name))
             .thumbnail(format!("{}?size=512", target_user.face()))
             .field("**ID**", format!("`{}`", target_user.id), true)
-            .field("**Conta Criada**", format!("`{}`", account_created.format("%d/%m/%Y %H:%M")), true)
-            .field("**Privado**", format!("`{}`", if is_private { "Sim" } else { "Não" }), true)
+            .field(
+                "**Conta Criada**",
+                format!("`{}`", account_created.format("%d/%m/%Y %H:%M")),
+                true,
+            )
+            .field(
+                "**Privado**",
+                format!("`{}`", if is_private { "Sim" } else { "Não" }),
+                true,
+            )
             .colour(Colour::new(0x2B2D31));
         if let Some(joined) = guild_join_date {
-            e = e.field("**Entrou no Servidor**", format!("`{}`", joined.format("%d/%m/%Y %H:%M")), true);
+            e = e.field(
+                "**Entrou no Servidor**",
+                format!("`{}`", joined.format("%d/%m/%Y %H:%M")),
+                true,
+            );
         }
         e
     };
@@ -81,9 +93,15 @@ pub async fn build_user_info(
     })
 }
 
-pub async fn handle_user_info_back(ctx: &Context, interaction: &ComponentInteraction, pool: &PgPool) -> Result<()> {
+pub async fn handle_user_info_back(
+    ctx: &Context,
+    interaction: &ComponentInteraction,
+    pool: &PgPool,
+) -> Result<()> {
     let custom_id = &interaction.data.custom_id;
-    let target_user_id = custom_id.split('_').nth(2)
+    let target_user_id = custom_id
+        .split('_')
+        .nth(2)
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
@@ -91,36 +109,43 @@ pub async fn handle_user_info_back(ctx: &Context, interaction: &ComponentInterac
         Ok(u) => u,
         Err(e) => {
             error!("Failed to fetch user for user info back: {}", e);
-            interaction.create_response(&ctx.http, CreateInteractionResponse::Message(
-                CreateInteractionResponseMessage::new()
-                    .content("Erro ao buscar informações do usuário.")
-                    .ephemeral(true)
-            )).await?;
+            interaction
+                .create_response(
+                    &ctx.http,
+                    CreateInteractionResponse::Message(
+                        CreateInteractionResponseMessage::new()
+                            .content("Erro ao buscar informações do usuário.")
+                            .ephemeral(true),
+                    ),
+                )
+                .await?;
             return Err(crate::errors::BotError::Discord(e));
         }
     };
 
     let guild_id = interaction.guild_id.map(|g| g.get()).unwrap_or(0);
     let guild_config = if guild_id > 0 {
-        crate::repositories::guild_repo::find_by_id(pool, &guild_id.to_string()).await?.unwrap_or_else(|| crate::models::Guild {
-            guild_id: guild_id.to_string(),
-            prefix: None,
-            member_role_id: None,
-            staff_channel_id: None,
-            welcome_channel_id: None,
-            log_channel_id: None,
-            admin_role_id: None,
-            staff_role_id: None,
-            ticket_category_id: None,
-            frin_monitor_channel_id: None,
-            modules: serde_json::json!({}),
-            webhook_url: None,
-            premium: None,
-            track_mute: None,
-            track_deaf: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        })
+        crate::repositories::guild_repo::find_by_id(pool, &guild_id.to_string())
+            .await?
+            .unwrap_or_else(|| crate::models::Guild {
+                guild_id: guild_id.to_string(),
+                prefix: None,
+                member_role_id: None,
+                staff_channel_id: None,
+                welcome_channel_id: None,
+                log_channel_id: None,
+                admin_role_id: None,
+                staff_role_id: None,
+                ticket_category_id: None,
+                frin_monitor_channel_id: None,
+                modules: serde_json::json!({}),
+                webhook_url: None,
+                premium: None,
+                track_mute: None,
+                track_deaf: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
     } else {
         crate::models::Guild {
             guild_id: guild_id.to_string(),
@@ -144,14 +169,38 @@ pub async fn handle_user_info_back(ctx: &Context, interaction: &ComponentInterac
     };
 
     let is_staff = if let Some(guild_id) = interaction.guild_id {
-        crate::permissions::authorize(ctx, guild_id, interaction.user.id, crate::permissions::Action::Configure, None).await.is_ok()
-    } else { false };
-    let result = build_user_info(ctx, &target_user, &guild_config, interaction.user.id.get(), is_staff, pool).await?;
+        crate::permissions::authorize(
+            ctx,
+            guild_id,
+            interaction.user.id,
+            crate::permissions::Action::Configure,
+            None,
+        )
+        .await
+        .is_ok()
+    } else {
+        false
+    };
+    let result = build_user_info(
+        ctx,
+        &target_user,
+        &guild_config,
+        interaction.user.id.get(),
+        is_staff,
+        pool,
+    )
+    .await?;
 
     let mut message = CreateInteractionResponseMessage::new().ephemeral(true);
-    if let Some(content) = result.content { message = message.content(content); }
-    if let Some(embed) = result.embed { message = message.embed(embed); }
+    if let Some(content) = result.content {
+        message = message.content(content);
+    }
+    if let Some(embed) = result.embed {
+        message = message.embed(embed);
+    }
     message = message.components(result.action_row.into_iter().collect());
-    interaction.create_response(&ctx.http, CreateInteractionResponse::Message(message)).await?;
+    interaction
+        .create_response(&ctx.http, CreateInteractionResponse::Message(message))
+        .await?;
     Ok(())
 }

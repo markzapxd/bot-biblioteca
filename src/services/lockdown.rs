@@ -165,7 +165,7 @@ impl Store {
         guild: u64,
         action: Action,
         channels: Vec<ChannelSnapshot>,
-        mut effect: F,
+        effect: F,
     ) -> Result<bool>
     where
         F: FnMut(u64, Vec<PermissionOverwrite>) -> Fut,
@@ -225,7 +225,7 @@ impl Store {
             }
             Action::RaidDisable => record.raid = None,
             Action::Reconcile(now) => {
-                if record.expires.map_or(true, |expiry| expiry <= now) {
+                if record.expires.is_none_or(|expiry| expiry <= now) {
                     record.raid = None;
                 }
             }

@@ -33,7 +33,7 @@ pub async fn create(
 
 pub async fn find_by_name(pool: &PgPool, guild_id: &str, name: &str) -> Result<Option<CustomCard>> {
     let card = sqlx::query_as::<_, CustomCard>(
-        "SELECT * FROM custom_cards WHERE guild_id = $1 AND name = $2"
+        "SELECT * FROM custom_cards WHERE guild_id = $1 AND name = $2",
     )
     .bind(guild_id)
     .bind(name)
@@ -52,7 +52,7 @@ pub async fn find_by_id(pool: &PgPool, id: i32) -> Result<Option<CustomCard>> {
 
 pub async fn list_by_guild(pool: &PgPool, guild_id: &str) -> Result<Vec<CustomCard>> {
     let cards = sqlx::query_as::<_, CustomCard>(
-        "SELECT * FROM custom_cards WHERE guild_id = $1 ORDER BY name"
+        "SELECT * FROM custom_cards WHERE guild_id = $1 ORDER BY name",
     )
     .bind(guild_id)
     .fetch_all(pool)
@@ -93,7 +93,7 @@ pub async fn update(
             footer = COALESCE($7, footer),
             updated_at = NOW()
          WHERE guild_id = $1 AND name = $2
-         RETURNING *"
+         RETURNING *",
     )
     .bind(guild_id)
     .bind(name)
@@ -109,21 +109,61 @@ pub async fn update(
 
 // A single UPDATE is atomic; the existing (guild_id, name) unique constraint
 // rejects a conflicting rename without changing either card or its stable ID.
-pub async fn replace(pool: &PgPool, guild: &str, id: i32, name: &str, title: &str,
-    description: Option<&str>, image: Option<&str>, color: Option<&str>) -> Result<Option<CustomCard>> {
-    Ok(sqlx::query_as::<_, CustomCard>("UPDATE custom_cards SET name=$3, title=$4,
+pub struct Replacement<'a> {
+    pub name: &'a str,
+    pub title: &'a str,
+    pub description: Option<&'a str>,
+    pub image: Option<&'a str>,
+    pub color: Option<&'a str>,
+}
+
+pub async fn replace(
+    pool: &PgPool,
+    guild: &str,
+    id: i32,
+    fields: Replacement<'_>,
+) -> Result<Option<CustomCard>> {
+    let Replacement {
+        name,
+        title,
+        description,
+        image,
+        color,
+    } = fields;
+    Ok(sqlx::query_as::<_, CustomCard>(
+        "UPDATE custom_cards SET name=$3, title=$4,
         description=$5, image_url=$6, color=$7, updated_at=NOW()
-        WHERE guild_id=$1 AND id=$2 RETURNING *")
-        .bind(guild).bind(id).bind(name).bind(title).bind(description).bind(image).bind(color)
-        .fetch_optional(pool).await?)
+        WHERE guild_id=$1 AND id=$2 RETURNING *",
+    )
+    .bind(guild)
+    .bind(id)
+    .bind(name)
+    .bind(title)
+    .bind(description)
+    .bind(image)
+    .bind(color)
+    .fetch_optional(pool)
+    .await?)
 }
 
 pub async fn find_by_guild_id(pool: &PgPool, guild: &str, id: i32) -> Result<Option<CustomCard>> {
-    Ok(sqlx::query_as::<_, CustomCard>("SELECT * FROM custom_cards WHERE guild_id=$1 AND id=$2")
-        .bind(guild).bind(id).fetch_optional(pool).await?)
+    Ok(
+        sqlx::query_as::<_, CustomCard>("SELECT * FROM custom_cards WHERE guild_id=$1 AND id=$2")
+            .bind(guild)
+            .bind(id)
+            .fetch_optional(pool)
+            .await?,
+    )
 }
 
 pub async fn delete_by_id(pool: &PgPool, guild: &str, id: i32) -> Result<bool> {
-    Ok(sqlx::query("DELETE FROM custom_cards WHERE guild_id=$1 AND id=$2")
-        .bind(guild).bind(id).execute(pool).await?.rows_affected() > 0)
+    Ok(
+        sqlx::query("DELETE FROM custom_cards WHERE guild_id=$1 AND id=$2")
+            .bind(guild)
+            .bind(id)
+            .execute(pool)
+            .await?
+            .rows_affected()
+            > 0,
+    )
 }

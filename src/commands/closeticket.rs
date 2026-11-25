@@ -1,8 +1,8 @@
-use serenity::all::*;
-use sqlx::PgPool;
 use crate::cache::GuildCache;
 use crate::errors::Result;
 use crate::services::ticket_manager;
+use serenity::all::*;
+use sqlx::PgPool;
 
 pub fn register(commands: &mut Vec<CreateCommand>) {
     commands.push(
@@ -15,10 +15,18 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
     );
 }
 
-pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
+pub async fn handle(
+    ctx: &Context,
+    interaction: &CommandInteraction,
+    _pool: &PgPool,
+    _guild_cache: &GuildCache,
+) -> Result<()> {
     // Fresh membership and owner-or-staff policy are enforced by the service.
 
-    let target = interaction.data.options.first()
+    let target = interaction
+        .data
+        .options
+        .first()
         .and_then(|o| o.value.as_user_id())
         .ok_or(crate::errors::BotError::Validation("User required".into()))?;
 

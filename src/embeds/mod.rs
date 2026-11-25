@@ -95,7 +95,11 @@ pub fn message_delete(content: &str, author: &serenity::all::User, channel: &str
         .thumbnail(author.face())
         .field("Autor", author.name.clone(), true)
         .field("Canal", channel, true)
-        .field("Conteúdo", crate::services::log_manager::log_text(content), false)
+        .field(
+            "Conteúdo",
+            crate::services::log_manager::log_text(content),
+            false,
+        )
         .colour(Colour::new(0x2B2D31))
 }
 

@@ -21,12 +21,7 @@ pub async fn handle(ctx: Context, old: Option<Member>, new: Option<Member>) {
                 let new_roles = member.roles.as_slice();
                 if old_roles != new_roles {
                     let _ = crate::services::log_manager::log_member_update(
-                        &ctx,
-                        old_roles,
-                        new_roles,
-                        &member,
-                        guild_id,
-                        pool,
+                        &ctx, old_roles, new_roles, &member, guild_id, pool,
                     )
                     .await;
                 }
@@ -58,7 +53,9 @@ pub async fn handle(ctx: Context, old: Option<Member>, new: Option<Member>) {
                     .await;
                 }
 
-                if old_member.user.avatar != member.user.avatar || old_member.avatar != member.avatar {
+                if old_member.user.avatar != member.user.avatar
+                    || old_member.avatar != member.avatar
+                {
                     let new_avatar_url = member.face();
                     let _ = crate::services::log_manager::log_avatar_update(
                         &ctx,
@@ -79,10 +76,16 @@ pub async fn handle(ctx: Context, old: Option<Member>, new: Option<Member>) {
                     entries.push((HistoryKind::Nickname, serde_json::json!({"name":effective_nick(previous), "date":now, "guild_id":member.guild_id.to_string()})));
                 }
                 if previous.user.name != member.user.name {
-                    entries.push((HistoryKind::Username, serde_json::json!({"name":previous.user.name, "date":now})));
+                    entries.push((
+                        HistoryKind::Username,
+                        serde_json::json!({"name":previous.user.name, "date":now}),
+                    ));
                 }
                 if previous.user.avatar != member.user.avatar {
-                    entries.push((HistoryKind::Avatar, serde_json::json!({"url":previous.user.face(), "date":now})));
+                    entries.push((
+                        HistoryKind::Avatar,
+                        serde_json::json!({"url":previous.user.face(), "date":now}),
+                    ));
                 }
                 if previous.avatar != member.avatar {
                     entries.push((HistoryKind::Avatar, serde_json::json!({"url":previous.face(), "date":now, "guild_id":member.guild_id.to_string()})));

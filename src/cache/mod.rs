@@ -44,7 +44,8 @@ mod tests {
         let guild: Guild = serde_json::from_value(serde_json::json!({
             "guild_id": "1", "modules": {},
             "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"
-        })).unwrap();
+        }))
+        .unwrap();
         cache.load_all(vec![guild.clone()]);
         assert!(cache.get("1").is_none());
         cache.set("1".into(), guild.clone());

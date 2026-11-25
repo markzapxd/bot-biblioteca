@@ -1,9 +1,9 @@
-use serenity::all::*;
-use sqlx::PgPool;
 use crate::cache::GuildCache;
 use crate::errors::Result;
 use crate::permissions;
 use crate::theme;
+use serenity::all::*;
+use sqlx::PgPool;
 
 pub fn register(commands: &mut Vec<CreateCommand>) {
     commands.push(
@@ -17,26 +17,50 @@ pub fn register(commands: &mut Vec<CreateCommand>) {
     );
 }
 
-pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgPool, _guild_cache: &GuildCache) -> Result<()> {
-    let guild_id = interaction.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
-    permissions::authorize(ctx, guild_id, interaction.user.id, permissions::Action::Configure, None).await?;
+pub async fn handle(
+    ctx: &Context,
+    interaction: &CommandInteraction,
+    _pool: &PgPool,
+    _guild_cache: &GuildCache,
+) -> Result<()> {
+    let guild_id = interaction
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+    permissions::authorize(
+        ctx,
+        guild_id,
+        interaction.user.id,
+        permissions::Action::Configure,
+        None,
+    )
+    .await?;
 
-    let target = interaction.data.options.first()
+    let target = interaction
+        .data
+        .options
+        .first()
         .and_then(|o| o.value.as_user_id())
         .ok_or(crate::errors::BotError::Validation("User required".into()))?;
 
     let target_member = guild_id.member(ctx, target).await?;
     let target_user = target.to_user(ctx).await?;
 
-    let join_date = target_member.joined_at
+    let join_date = target_member
+        .joined_at
         .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_else(|| "Desconhecido".into());
 
-    let roles: Vec<String> = target_member.roles.iter()
+    let roles: Vec<String> = target_member
+        .roles
+        .iter()
         .take(20)
         .map(|r| format!("<@&{}>", r.get()))
         .collect();
-    let roles_str = if roles.is_empty() { "Nenhum".into() } else { roles.join(" ") };
+    let roles_str = if roles.is_empty() {
+        "Nenhum".into()
+    } else {
+        roles.join(" ")
+    };
 
     let embed = CreateEmbed::new()
         .title(format!("Lookup — {}", target_user.name))
@@ -64,59 +88,157 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, _pool: &PgP
     ];
     let row = CreateActionRow::Buttons(buttons);
 
-    interaction.create_response(ctx, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new().embed(embed).components(vec![row])
-    )).await?;
+    interaction
+        .create_response(
+            ctx,
+            CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                    .embed(embed)
+                    .components(vec![row]),
+            ),
+        )
+        .await?;
     Ok(())
 }
 
-pub async fn handle_ban(ctx: &Context, component: &ComponentInteraction, target: UserId) -> Result<()> {
-    permissions::authorize(ctx, component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?, component.user.id, permissions::Action::Ban, Some(target)).await?;
+pub async fn handle_ban(
+    ctx: &Context,
+    component: &ComponentInteraction,
+    target: UserId,
+) -> Result<()> {
+    permissions::authorize(
+        ctx,
+        component
+            .guild_id
+            .ok_or(crate::errors::BotError::Validation("Guild only".into()))?,
+        component.user.id,
+        permissions::Action::Ban,
+        Some(target),
+    )
+    .await?;
 
-    let guild_id = component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+    let guild_id = component
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     if let Ok(m) = guild_id.member(ctx, target).await {
         m.ban_with_reason(ctx, 0, "Banned via lookup").await?;
     } else {
-        guild_id.ban_with_reason(ctx, target, 0, "Banned via lookup").await?;
+        guild_id
+            .ban_with_reason(ctx, target, 0, "Banned via lookup")
+            .await?;
     }
-    let embed = theme::success("Usuario Banido", &format!("<@{}> foi banido.", target.get()));
-    component.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
-        CreateInteractionResponseMessage::new().embed(embed).components(vec![])
-    )).await?;
+    let embed = theme::success(
+        "Usuario Banido",
+        &format!("<@{}> foi banido.", target.get()),
+    );
+    component
+        .create_response(
+            &ctx.http,
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new()
+                    .embed(embed)
+                    .components(vec![]),
+            ),
+        )
+        .await?;
     Ok(())
 }
 
-pub async fn handle_kick(ctx: &Context, component: &ComponentInteraction, target: UserId) -> Result<()> {
-    permissions::authorize(ctx, component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?, component.user.id, permissions::Action::Kick, Some(target)).await?;
+pub async fn handle_kick(
+    ctx: &Context,
+    component: &ComponentInteraction,
+    target: UserId,
+) -> Result<()> {
+    permissions::authorize(
+        ctx,
+        component
+            .guild_id
+            .ok_or(crate::errors::BotError::Validation("Guild only".into()))?,
+        component.user.id,
+        permissions::Action::Kick,
+        Some(target),
+    )
+    .await?;
 
-    let guild_id = component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+    let guild_id = component
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let m = guild_id.member(ctx, target).await?;
     m.kick_with_reason(ctx, "Kicked via lookup").await?;
-    let embed = theme::success("Usuario Expulso", &format!("<@{}> foi expulso.", target.get()));
-    component.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
-        CreateInteractionResponseMessage::new().embed(embed).components(vec![])
-    )).await?;
+    let embed = theme::success(
+        "Usuario Expulso",
+        &format!("<@{}> foi expulso.", target.get()),
+    );
+    component
+        .create_response(
+            &ctx.http,
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new()
+                    .embed(embed)
+                    .components(vec![]),
+            ),
+        )
+        .await?;
     Ok(())
 }
 
-pub async fn handle_mute(ctx: &Context, component: &ComponentInteraction, target: UserId) -> Result<()> {
-    permissions::authorize(ctx, component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?, component.user.id, permissions::Action::Timeout, Some(target)).await?;
+pub async fn handle_mute(
+    ctx: &Context,
+    component: &ComponentInteraction,
+    target: UserId,
+) -> Result<()> {
+    permissions::authorize(
+        ctx,
+        component
+            .guild_id
+            .ok_or(crate::errors::BotError::Validation("Guild only".into()))?,
+        component.user.id,
+        permissions::Action::Timeout,
+        Some(target),
+    )
+    .await?;
 
-    let guild_id = component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
+    let guild_id = component
+        .guild_id
+        .ok_or(crate::errors::BotError::Validation("Guild only".into()))?;
     let mut m = guild_id.member(ctx, target).await?;
     let until_ts = (chrono::Utc::now() + chrono::Duration::minutes(10)).timestamp();
     let since_epoch = serenity::model::Timestamp::from_unix_timestamp(until_ts)
         .map_err(|e| crate::errors::BotError::Internal(e.to_string()))?;
-    m.disable_communication_until_datetime(&ctx.http, since_epoch).await?;
-    let embed = theme::success("Usuario Silenciado", &format!("<@{}> silenciado por 10 minutos.", target.get()));
-    component.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
-        CreateInteractionResponseMessage::new().embed(embed).components(vec![])
-    )).await?;
+    m.disable_communication_until_datetime(&ctx.http, since_epoch)
+        .await?;
+    let embed = theme::success(
+        "Usuario Silenciado",
+        &format!("<@{}> silenciado por 10 minutos.", target.get()),
+    );
+    component
+        .create_response(
+            &ctx.http,
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new()
+                    .embed(embed)
+                    .components(vec![]),
+            ),
+        )
+        .await?;
     Ok(())
 }
 
-pub async fn handle_warn(ctx: &Context, component: &ComponentInteraction, target: UserId) -> Result<()> {
-    permissions::authorize(ctx, component.guild_id.ok_or(crate::errors::BotError::Validation("Guild only".into()))?, component.user.id, permissions::Action::Warn, Some(target)).await?;
+pub async fn handle_warn(
+    ctx: &Context,
+    component: &ComponentInteraction,
+    target: UserId,
+) -> Result<()> {
+    permissions::authorize(
+        ctx,
+        component
+            .guild_id
+            .ok_or(crate::errors::BotError::Validation("Guild only".into()))?,
+        component.user.id,
+        permissions::Action::Warn,
+        Some(target),
+    )
+    .await?;
 
     if let Ok(user) = target.to_user(ctx).await {
         if let Ok(dm) = user.create_dm_channel(ctx).await {
@@ -124,12 +246,24 @@ pub async fn handle_warn(ctx: &Context, component: &ComponentInteraction, target
                 .title("Advertencia")
                 .description("Voce recebeu uma advertencia da staff.")
                 .colour(Colour::new(0x2B2D31));
-            let _ = dm.send_message(ctx, CreateMessage::new().embed(warn_embed)).await;
+            let _ = dm
+                .send_message(ctx, CreateMessage::new().embed(warn_embed))
+                .await;
         }
     }
-    let embed = theme::success("Advertencia Enviada", &format!("<@{}> foi advertido.", target.get()));
-    component.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
-        CreateInteractionResponseMessage::new().embed(embed).components(vec![])
-    )).await?;
+    let embed = theme::success(
+        "Advertencia Enviada",
+        &format!("<@{}> foi advertido.", target.get()),
+    );
+    component
+        .create_response(
+            &ctx.http,
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new()
+                    .embed(embed)
+                    .components(vec![]),
+            ),
+        )
+        .await?;
     Ok(())
 }

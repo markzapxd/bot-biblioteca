@@ -3,18 +3,33 @@ use crate::models::User;
 use sqlx::PgPool;
 
 #[derive(Clone, Copy)]
-pub enum HistoryKind { Username, Avatar, Nickname }
+pub enum HistoryKind {
+    Username,
+    Avatar,
+    Nickname,
+}
 
 /// Atomic row-locked append. Deduplicate adjacent equal values (per guild for
 /// nicknames), ignoring timestamps, then keep the latest 500 appended entries.
-pub async fn append_history(pool: &PgPool, user_id: &str, kind: HistoryKind, entry: serde_json::Value) -> Result<()> {
+pub async fn append_history(
+    pool: &PgPool,
+    user_id: &str,
+    kind: HistoryKind,
+    entry: serde_json::Value,
+) -> Result<()> {
     let (column, key) = match kind {
         HistoryKind::Username => ("username_history", "name"),
         HistoryKind::Avatar => ("avatar_history", "url"),
         HistoryKind::Nickname => ("nickname_history", "name"),
     };
     let sql = format!("INSERT INTO users(user_id, {column}) VALUES ($1, jsonb_build_array($2::jsonb)) ON CONFLICT(user_id) DO UPDATE SET {column} = (SELECT COALESCE(jsonb_agg(value ORDER BY ord), '[]'::jsonb) FROM jsonb_array_elements(COALESCE(users.{column}, '[]'::jsonb) || jsonb_build_array($2::jsonb)) WITH ORDINALITY e(value,ord) WHERE ord > jsonb_array_length(COALESCE(users.{column}, '[]'::jsonb)) + 1 - 500), updated_at=NOW() WHERE (SELECT value->>$3 FROM jsonb_array_elements(COALESCE(users.{column}, '[]'::jsonb)) WITH ORDINALITY e(value,ord) WHERE ($4::bool = FALSE OR value->>'guild_id' IS NOT DISTINCT FROM $2::jsonb->>'guild_id') ORDER BY ord DESC LIMIT 1) IS DISTINCT FROM $2::jsonb->>$3");
-    sqlx::query(&sql).bind(user_id).bind(entry).bind(key).bind(matches!(kind, HistoryKind::Nickname | HistoryKind::Avatar)).execute(pool).await?;
+    sqlx::query(&sql)
+        .bind(user_id)
+        .bind(entry)
+        .bind(key)
+        .bind(matches!(kind, HistoryKind::Nickname | HistoryKind::Avatar))
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -59,11 +74,18 @@ pub async fn add_voice_time(pool: &PgPool, user_id: &str, duration_ms: i64) -> R
     Ok(())
 }
 
-async fn lock_voice_user(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, user_id: &str) -> Result<()> {
+async fn lock_voice_user(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: &str,
+) -> Result<()> {
     sqlx::query("INSERT INTO users(user_id) VALUES ($1) ON CONFLICT DO NOTHING")
-        .bind(user_id).execute(&mut **tx).await?;
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
     sqlx::query("SELECT user_id FROM users WHERE user_id=$1 FOR UPDATE")
-        .bind(user_id).execute(&mut **tx).await?;
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
     Ok(())
 }
 
@@ -84,7 +106,8 @@ pub async fn recompute_voice_time(pool: &PgPool, user_id: &str) -> Result<()> {
 
 pub async fn recompute_all_voice_times(pool: &PgPool) -> Result<()> {
     let users = sqlx::query_scalar::<_, String>("SELECT user_id FROM users ORDER BY user_id")
-        .fetch_all(pool).await?;
+        .fetch_all(pool)
+        .await?;
     for user in users {
         recompute_voice_time(pool, &user).await?;
     }

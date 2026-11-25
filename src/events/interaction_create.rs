@@ -7,31 +7,10 @@ where
     C: FnOnce() -> F,
     F: std::future::Future<Output = T>,
 {
-    if !authorization.await { return None; }
-    Some(callback().await)
-}
-
-#[cfg(test)]
-mod callback_lifecycle_tests {
-    use super::dispatch_authorized;
-    use std::cell::Cell;
-
-    #[tokio::test]
-    async fn panel_revoked_before_callback_selects_denial_without_invoking_handler() {
-        let current_membership = Cell::new(Ok(true));
-        let calls = Cell::new(0);
-        let dispatch = || dispatch_authorized(
-            async { current_membership.get().unwrap_or(false) },
-            || async { calls.set(calls.get() + 1); "handled" },
-        );
-        assert_eq!(dispatch().await, Some("handled")); // panel initially granted
-        current_membership.set(Ok(false)); // permission revoked before component callback
-        assert_eq!(dispatch().await, None); // selects production ephemeral denial branch
-        assert_eq!(calls.get(), 1);
-        current_membership.set(Err(())); // membership resolution unavailable
-        assert_eq!(dispatch().await, None);
-        assert_eq!(calls.get(), 1);
+    if !authorization.await {
+        return None;
     }
+    Some(callback().await)
 }
 
 pub async fn handle(ctx: Context, interaction: Interaction) {
@@ -45,10 +24,19 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
             tracing::info!("Received command: {}", command.data.name);
             if let Err(e) = crate::commands::route(&ctx, &command, &state).await {
                 tracing::error!("Error routing command {}: {:?}", command.data.name, e);
-                if matches!(e, crate::errors::BotError::Unauthorized(_)) && command.get_response(&ctx.http).await.is_err() {
-                    let _ = command.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
-                        serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
-                    )).await;
+                if matches!(e, crate::errors::BotError::Unauthorized(_))
+                    && command.get_response(&ctx.http).await.is_err()
+                {
+                    let _ = command
+                        .create_response(
+                            &ctx.http,
+                            serenity::all::CreateInteractionResponse::Message(
+                                serenity::all::CreateInteractionResponseMessage::new()
+                                    .content("Acesso negado.")
+                                    .ephemeral(true),
+                            ),
+                        )
+                        .await;
                 }
             }
         }
@@ -56,9 +44,13 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
             let custom_id = &component.data.custom_id;
             tracing::info!("Received component interaction: {}", custom_id);
 
-            
             let guild_config = if let Some(guild_id) = component.guild_id {
-                match crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await {
+                match crate::repositories::guild_repo::find_by_id(
+                    &state.pool,
+                    &guild_id.to_string(),
+                )
+                .await
+                {
                     Ok(Some(config)) => config,
                     _ => crate::models::Guild {
                         guild_id: guild_id.to_string(),
@@ -78,7 +70,7 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                         track_deaf: None,
                         created_at: chrono::Utc::now(),
                         updated_at: chrono::Utc::now(),
-                    }
+                    },
                 }
             } else {
                 crate::models::Guild {
@@ -102,242 +94,407 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 }
             };
 
-            let protected = custom_id.starts_with("modules_") || custom_id.starts_with("logs_")
-                || custom_id.starts_with("cfg_") || custom_id.starts_with("card_")
-                || custom_id.starts_with("lockdown_") || custom_id == "raidmode_toggle";
+            let protected = custom_id.starts_with("modules_")
+                || custom_id.starts_with("logs_")
+                || custom_id.starts_with("cfg_")
+                || custom_id.starts_with("card_")
+                || custom_id.starts_with("lockdown_")
+                || custom_id == "raidmode_toggle";
             // Ticket and verification callbacks enforce their resource-scoped policies in services.
-            let authorization = async { if custom_id.starts_with("owner_") {
-                crate::permissions::require_owner(component.user.id.get()).is_ok()
-            } else if protected {
-                if let Some(guild_id) = component.guild_id {
-                    crate::permissions::authorize(&ctx, guild_id, component.user.id, crate::permissions::Action::Configure, None).await.is_ok()
-                } else { false }
-            } else { true } };
+            let authorization = async {
+                if custom_id.starts_with("owner_") {
+                    crate::permissions::require_owner(component.user.id.get()).is_ok()
+                } else if protected {
+                    if let Some(guild_id) = component.guild_id {
+                        crate::permissions::authorize(
+                            &ctx,
+                            guild_id,
+                            component.user.id,
+                            crate::permissions::Action::Configure,
+                            None,
+                        )
+                        .await
+                        .is_ok()
+                    } else {
+                        false
+                    }
+                } else {
+                    true
+                }
+            };
             let dispatched = dispatch_authorized(authorization, || async {
                 match *custom_id {
-                _ if custom_id == "privacy_toggle" => {
-                    crate::commands::privacy::handle_toggle(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "raidmode_toggle" => {
-                    crate::commands::raidmode::handle_toggle(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id.starts_with("modules_toggle_") => {
-                    crate::commands::modulos::handle_toggle(&ctx, &component, &state.pool, &state.guild_cache).await
-                }
-                _ if custom_id == "logs_select_menu" => {
-                    crate::commands::configlogs::handle_toggle(&ctx, &component, &state.pool, &state.guild_cache).await
-                }
-                _ if custom_id == "logs_create_channel" => {
-                    crate::commands::configlogs::handle_create_channel(&ctx, &component, &state.pool, &state.guild_cache).await
-                }
-                _ if custom_id == "lockdown_full_setup" => {
-                    crate::commands::lockdown::handle_full_setup(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "lockdown_toggle" => {
-                    crate::commands::lockdown::handle_toggle(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id.starts_with("avatar_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if parts.len() == 3 {
-                        let user_id = parts[1].parse::<u64>().unwrap_or(0);
-                        let page = parts[2].parse::<usize>().unwrap_or(0);
-                        crate::services::avatar_manager::handle_avatar_history(&ctx, &component, user_id, page, &state.pool).await
-                    } else {
-                        Ok(())
+                    _ if custom_id == "privacy_toggle" => {
+                        crate::commands::privacy::handle_toggle(&ctx, &component, &state.pool).await
                     }
-                }
-                _ if custom_id.starts_with("userinfo_back_") => {
-                    crate::services::user_info_manager::handle_user_info_back(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "owner_setrole" => {
-                    crate::commands::owner::handle_setrole_button(&ctx, &component).await
-                }
-                _ if custom_id == "owner_finally" => {
-                    crate::commands::owner::handle_finally(&ctx, &component).await
-                }
-                _ if custom_id == "owner_clear" => {
-                    crate::commands::owner::handle_clear_button(&ctx, &component).await
-                }
-                _ if custom_id.starts_with("history_names_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if parts.len() == 3 {
-                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
-                        crate::services::history_manager::handle_names_button(&ctx, &component, user_id, &state.pool).await
-                    } else {
-                        Ok(())
+                    _ if custom_id == "raidmode_toggle" => {
+                        crate::commands::raidmode::handle_toggle(&ctx, &component, &state.pool)
+                            .await
                     }
-                }
-                _ if custom_id.starts_with("history_nicknames_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if parts.len() == 3 {
-                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
-                        crate::services::history_manager::handle_nicknames_button(&ctx, &component, user_id, &state.pool).await
-                    } else {
-                        Ok(())
+                    _ if custom_id.starts_with("modules_toggle_") => {
+                        crate::commands::modulos::handle_toggle(
+                            &ctx,
+                            &component,
+                            &state.pool,
+                            &state.guild_cache,
+                        )
+                        .await
                     }
-                }
-                _ if custom_id.starts_with("history_avatars_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if parts.len() == 3 {
-                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
-                        crate::services::history_manager::handle_avatars_button(&ctx, &component, user_id, 0, &state.pool).await
-                    } else if parts.len() == 4 {
-                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
-                        let page = parts[3].parse::<usize>().unwrap_or(0);
-                        crate::services::history_manager::handle_avatars_button(&ctx, &component, user_id, page, &state.pool).await
-                    } else {
-                        Ok(())
+                    _ if custom_id == "logs_select_menu" => {
+                        crate::commands::configlogs::handle_toggle(
+                            &ctx,
+                            &component,
+                            &state.pool,
+                            &state.guild_cache,
+                        )
+                        .await
                     }
-                }
-                _ if custom_id.starts_with("history_avatar_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if parts.len() == 4 {
-                        let user_id = parts[2].parse::<u64>().unwrap_or(0);
-                        let page = parts[3].parse::<usize>().unwrap_or(0);
-                        crate::services::history_manager::handle_avatars_button(&ctx, &component, user_id, page, &state.pool).await
-                    } else {
-                        Ok(())
+                    _ if custom_id == "logs_create_channel" => {
+                        crate::commands::configlogs::handle_create_channel(
+                            &ctx,
+                            &component,
+                            &state.pool,
+                            &state.guild_cache,
+                        )
+                        .await
                     }
+                    _ if custom_id == "lockdown_full_setup" => {
+                        crate::commands::lockdown::handle_full_setup(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "lockdown_toggle" => {
+                        crate::commands::lockdown::handle_toggle(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id.starts_with("avatar_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if parts.len() == 3 {
+                            let user_id = parts[1].parse::<u64>().unwrap_or(0);
+                            let page = parts[2].parse::<usize>().unwrap_or(0);
+                            crate::services::avatar_manager::handle_avatar_history(
+                                &ctx,
+                                &component,
+                                user_id,
+                                page,
+                                &state.pool,
+                            )
+                            .await
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id.starts_with("userinfo_back_") => {
+                        crate::services::user_info_manager::handle_user_info_back(
+                            &ctx,
+                            &component,
+                            &state.pool,
+                        )
+                        .await
+                    }
+                    _ if custom_id == "owner_setrole" => {
+                        crate::commands::owner::handle_setrole_button(&ctx, &component).await
+                    }
+                    _ if custom_id == "owner_finally" => {
+                        crate::commands::owner::handle_finally(&ctx, &component).await
+                    }
+                    _ if custom_id == "owner_clear" => {
+                        crate::commands::owner::handle_clear_button(&ctx, &component).await
+                    }
+                    _ if custom_id.starts_with("history_names_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if parts.len() == 3 {
+                            let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                            crate::services::history_manager::handle_names_button(
+                                &ctx,
+                                &component,
+                                user_id,
+                                &state.pool,
+                            )
+                            .await
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id.starts_with("history_nicknames_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if parts.len() == 3 {
+                            let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                            crate::services::history_manager::handle_nicknames_button(
+                                &ctx,
+                                &component,
+                                user_id,
+                                &state.pool,
+                            )
+                            .await
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id.starts_with("history_avatars_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if parts.len() == 3 {
+                            let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                            crate::services::history_manager::handle_avatars_button(
+                                &ctx,
+                                &component,
+                                user_id,
+                                0,
+                                &state.pool,
+                            )
+                            .await
+                        } else if parts.len() == 4 {
+                            let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                            let page = parts[3].parse::<usize>().unwrap_or(0);
+                            crate::services::history_manager::handle_avatars_button(
+                                &ctx,
+                                &component,
+                                user_id,
+                                page,
+                                &state.pool,
+                            )
+                            .await
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id.starts_with("history_avatar_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if parts.len() == 4 {
+                            let user_id = parts[2].parse::<u64>().unwrap_or(0);
+                            let page = parts[3].parse::<usize>().unwrap_or(0);
+                            crate::services::history_manager::handle_avatars_button(
+                                &ctx,
+                                &component,
+                                user_id,
+                                page,
+                                &state.pool,
+                            )
+                            .await
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id == "request_access" => {
+                        crate::services::member_manager::handle_access_request(
+                            &ctx,
+                            &component,
+                            &guild_config,
+                        )
+                        .await
+                    }
+                    _ if custom_id.starts_with("approve_") => {
+                        crate::services::member_manager::handle_approval_action(
+                            &ctx,
+                            &component,
+                            true,
+                            &guild_config,
+                        )
+                        .await
+                    }
+                    _ if custom_id.starts_with("reject_") => {
+                        crate::services::member_manager::handle_approval_action(
+                            &ctx,
+                            &component,
+                            false,
+                            &guild_config,
+                        )
+                        .await
+                    }
+                    _ if custom_id == "ticket_open" => {
+                        crate::services::ticket_manager::handle_ticket_open(
+                            &ctx,
+                            &component,
+                            &guild_config,
+                        )
+                        .await
+                    }
+                    _ if custom_id == "ticket_close" => {
+                        crate::services::ticket_manager::handle_ticket_close_request(
+                            &ctx, &component,
+                        )
+                        .await
+                    }
+                    _ if custom_id == "ticket_close_cancel" => {
+                        crate::services::ticket_manager::handle_ticket_close_cancel(
+                            &ctx, &component,
+                        )
+                        .await
+                    }
+                    _ if custom_id == "ticket_close_confirm" => {
+                        crate::services::ticket_manager::handle_ticket_close_confirm(
+                            &ctx, &component,
+                        )
+                        .await
+                    }
+                    _ if custom_id.starts_with("lookup_ban_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if let Some(target_str) = parts.get(2) {
+                            if let Ok(target_id) = target_str.parse::<u64>() {
+                                let target = serenity::all::UserId::new(target_id);
+                                crate::commands::lookup::handle_ban(&ctx, &component, target).await
+                            } else {
+                                Ok(())
+                            }
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id.starts_with("lookup_kick_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if let Some(target_str) = parts.get(2) {
+                            if let Ok(target_id) = target_str.parse::<u64>() {
+                                let target = serenity::all::UserId::new(target_id);
+                                crate::commands::lookup::handle_kick(&ctx, &component, target).await
+                            } else {
+                                Ok(())
+                            }
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id.starts_with("lookup_mute_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if let Some(target_str) = parts.get(2) {
+                            if let Ok(target_id) = target_str.parse::<u64>() {
+                                let target = serenity::all::UserId::new(target_id);
+                                crate::commands::lookup::handle_mute(&ctx, &component, target).await
+                            } else {
+                                Ok(())
+                            }
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id.starts_with("lookup_warn_") => {
+                        let parts: Vec<&str> = custom_id.split('_').collect();
+                        if let Some(target_str) = parts.get(2) {
+                            if let Ok(target_id) = target_str.parse::<u64>() {
+                                let target = serenity::all::UserId::new(target_id);
+                                crate::commands::lookup::handle_warn(&ctx, &component, target).await
+                            } else {
+                                Ok(())
+                            }
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    _ if custom_id == "help_membro" => {
+                        crate::commands::help::handle_membro(&ctx, &component).await
+                    }
+                    _ if custom_id == "help_admin" => {
+                        crate::commands::help::handle_admin(&ctx, &component).await
+                    }
+                    _ if custom_id == "help_admin_p1" => {
+                        crate::commands::help::handle_admin_p1(&ctx, &component).await
+                    }
+                    _ if custom_id == "help_admin_p2" => {
+                        crate::commands::help::handle_admin_p2(&ctx, &component).await
+                    }
+                    _ if custom_id == "help_back" => {
+                        crate::commands::help::handle_back(&ctx, &component).await
+                    }
+                    _ if custom_id == "cfg_roles" => {
+                        crate::commands::config::handle_roles_button(&ctx, &component, &state).await
+                    }
+                    _ if custom_id == "cfg_channels" => {
+                        crate::commands::config::handle_channels_button(&ctx, &component, &state)
+                            .await
+                    }
+                    _ if custom_id == "cfg_back" => {
+                        crate::commands::config::handle_back_button(&ctx, &component, &state).await
+                    }
+                    _ if custom_id.starts_with("cfg_role_") => {
+                        crate::commands::config::handle_role_select(&ctx, &component, &state).await
+                    }
+                    _ if custom_id.starts_with("cfg_channel_") => {
+                        crate::commands::config::handle_channel_select(&ctx, &component, &state)
+                            .await
+                    }
+                    _ if custom_id.starts_with("card_page_") => {
+                        crate::commands::card::handle_page(&ctx, &component, &state.pool).await
+                    }
+                    _ if custom_id == "card_action_create" => {
+                        crate::commands::card::handle_create_button(&ctx, &component).await
+                    }
+                    _ if custom_id == "card_action_edit" => {
+                        crate::commands::card::handle_edit_button(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "card_action_send" => {
+                        crate::commands::card::handle_send_button(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "card_action_preview" => {
+                        crate::commands::card::handle_preview_button(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "card_action_delete" => {
+                        crate::commands::card::handle_delete_button(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "card_action_back" => {
+                        crate::commands::card::handle_back_button(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "card_select_edit" => {
+                        crate::commands::card::handle_select_edit(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "card_select_send" => {
+                        crate::commands::card::handle_select_send(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "card_select_preview" => {
+                        crate::commands::card::handle_select_preview(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ if custom_id == "card_select_delete" => {
+                        crate::commands::card::handle_select_delete(&ctx, &component, &state.pool)
+                            .await
+                    }
+                    _ => Ok(()),
                 }
-                _ if custom_id == "request_access" => {
-                    crate::services::member_manager::handle_access_request(&ctx, &component, &guild_config).await
-                }
-                _ if custom_id.starts_with("approve_") => {
-                    crate::services::member_manager::handle_approval_action(&ctx, &component, true, &guild_config).await
-                }
-                _ if custom_id.starts_with("reject_") => {
-                    crate::services::member_manager::handle_approval_action(&ctx, &component, false, &guild_config).await
-                }
-                _ if custom_id == "ticket_open" => {
-                    crate::services::ticket_manager::handle_ticket_open(&ctx, &component, &guild_config).await
-                }
-                _ if custom_id == "ticket_close" => {
-                    crate::services::ticket_manager::handle_ticket_close_request(&ctx, &component).await
-                }
-                _ if custom_id == "ticket_close_cancel" => {
-                    crate::services::ticket_manager::handle_ticket_close_cancel(&ctx, &component).await
-                }
-                _ if custom_id == "ticket_close_confirm" => {
-                    crate::services::ticket_manager::handle_ticket_close_confirm(&ctx, &component).await
-                }
-                _ if custom_id.starts_with("lookup_ban_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if let Some(target_str) = parts.get(2) {
-                        if let Ok(target_id) = target_str.parse::<u64>() {
-                            let target = serenity::all::UserId::new(target_id);
-                            crate::commands::lookup::handle_ban(&ctx, &component, target).await
-                        } else { Ok(()) }
-                    } else { Ok(()) }
-                }
-                _ if custom_id.starts_with("lookup_kick_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if let Some(target_str) = parts.get(2) {
-                        if let Ok(target_id) = target_str.parse::<u64>() {
-                            let target = serenity::all::UserId::new(target_id);
-                            crate::commands::lookup::handle_kick(&ctx, &component, target).await
-                        } else { Ok(()) }
-                    } else { Ok(()) }
-                }
-                _ if custom_id.starts_with("lookup_mute_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if let Some(target_str) = parts.get(2) {
-                        if let Ok(target_id) = target_str.parse::<u64>() {
-                            let target = serenity::all::UserId::new(target_id);
-                            crate::commands::lookup::handle_mute(&ctx, &component, target).await
-                        } else { Ok(()) }
-                    } else { Ok(()) }
-                }
-                _ if custom_id.starts_with("lookup_warn_") => {
-                    let parts: Vec<&str> = custom_id.split('_').collect();
-                    if let Some(target_str) = parts.get(2) {
-                        if let Ok(target_id) = target_str.parse::<u64>() {
-                            let target = serenity::all::UserId::new(target_id);
-                            crate::commands::lookup::handle_warn(&ctx, &component, target).await
-                        } else { Ok(()) }
-                    } else { Ok(()) }
-                }
-                _ if custom_id == "help_membro" => {
-                    crate::commands::help::handle_membro(&ctx, &component).await
-                }
-                _ if custom_id == "help_admin" => {
-                    crate::commands::help::handle_admin(&ctx, &component).await
-                }
-                _ if custom_id == "help_admin_p1" => {
-                    crate::commands::help::handle_admin_p1(&ctx, &component).await
-                }
-                _ if custom_id == "help_admin_p2" => {
-                    crate::commands::help::handle_admin_p2(&ctx, &component).await
-                }
-                _ if custom_id == "help_back" => {
-                    crate::commands::help::handle_back(&ctx, &component).await
-                }
-                _ if custom_id == "cfg_roles" => {
-                    crate::commands::config::handle_roles_button(&ctx, &component, &state).await
-                }
-                _ if custom_id == "cfg_channels" => {
-                    crate::commands::config::handle_channels_button(&ctx, &component, &state).await
-                }
-                _ if custom_id == "cfg_back" => {
-                    crate::commands::config::handle_back_button(&ctx, &component, &state).await
-                }
-                _ if custom_id.starts_with("cfg_role_") => {
-                    crate::commands::config::handle_role_select(&ctx, &component, &state).await
-                }
-                _ if custom_id.starts_with("cfg_channel_") => {
-                    crate::commands::config::handle_channel_select(&ctx, &component, &state).await
-                }
-                _ if custom_id.starts_with("card_page_") => {
-                    crate::commands::card::handle_page(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_action_create" => {
-                    crate::commands::card::handle_create_button(&ctx, &component).await
-                }
-                _ if custom_id == "card_action_edit" => {
-                    crate::commands::card::handle_edit_button(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_action_send" => {
-                    crate::commands::card::handle_send_button(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_action_preview" => {
-                    crate::commands::card::handle_preview_button(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_action_delete" => {
-                    crate::commands::card::handle_delete_button(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_action_back" => {
-                    crate::commands::card::handle_back_button(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_select_edit" => {
-                    crate::commands::card::handle_select_edit(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_select_send" => {
-                    crate::commands::card::handle_select_send(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_select_preview" => {
-                    crate::commands::card::handle_select_preview(&ctx, &component, &state.pool).await
-                }
-                _ if custom_id == "card_select_delete" => {
-                    crate::commands::card::handle_select_delete(&ctx, &component, &state.pool).await
-                }
-                _ => Ok(()),
-                }
-            }).await;
+            })
+            .await;
             let Some(result) = dispatched else {
-                let _ = component.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
-                    serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
-                )).await;
+                let _ = component
+                    .create_response(
+                        &ctx.http,
+                        serenity::all::CreateInteractionResponse::Message(
+                            serenity::all::CreateInteractionResponseMessage::new()
+                                .content("Acesso negado.")
+                                .ephemeral(true),
+                        ),
+                    )
+                    .await;
                 return;
             };
 
             if let Err(e) = result {
-                tracing::error!("Error handling component interaction {}: {:?}", custom_id, e);
-                if custom_id.starts_with("ticket_") || custom_id.starts_with("approve_") || custom_id.starts_with("reject_") {
+                tracing::error!(
+                    "Error handling component interaction {}: {:?}",
+                    custom_id,
+                    e
+                );
+                if custom_id.starts_with("ticket_")
+                    || custom_id.starts_with("approve_")
+                    || custom_id.starts_with("reject_")
+                {
                     let _ = component.edit_response(&ctx.http, serenity::all::EditInteractionResponse::new().content("Não foi possível concluir a ação. Acesso negado ou operação indisponível.")).await;
                 }
-                if matches!(e, crate::errors::BotError::Unauthorized(_)) && component.get_response(&ctx.http).await.is_err() {
-                    let _ = component.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
-                        serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
-                    )).await;
+                if matches!(e, crate::errors::BotError::Unauthorized(_))
+                    && component.get_response(&ctx.http).await.is_err()
+                {
+                    let _ = component
+                        .create_response(
+                            &ctx.http,
+                            serenity::all::CreateInteractionResponse::Message(
+                                serenity::all::CreateInteractionResponseMessage::new()
+                                    .content("Acesso negado.")
+                                    .ephemeral(true),
+                            ),
+                        )
+                        .await;
                 }
             }
         }
@@ -346,7 +503,12 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
             tracing::info!("Received modal submit: {}", custom_id);
 
             let guild_config = if let Some(guild_id) = modal_submit.guild_id {
-                match crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await {
+                match crate::repositories::guild_repo::find_by_id(
+                    &state.pool,
+                    &guild_id.to_string(),
+                )
+                .await
+                {
                     Ok(Some(config)) => config,
                     _ => crate::models::Guild {
                         guild_id: guild_id.to_string(),
@@ -366,7 +528,7 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                         track_deaf: None,
                         created_at: chrono::Utc::now(),
                         updated_at: chrono::Utc::now(),
-                    }
+                    },
                 }
             } else {
                 crate::models::Guild {
@@ -394,18 +556,42 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 crate::permissions::require_owner(modal_submit.user.id.get()).is_ok()
             } else if custom_id.starts_with("card_") {
                 if let Some(guild_id) = modal_submit.guild_id {
-                    crate::permissions::authorize(&ctx, guild_id, modal_submit.user.id, crate::permissions::Action::Configure, None).await.is_ok()
-                } else { false }
-            } else { true };
+                    crate::permissions::authorize(
+                        &ctx,
+                        guild_id,
+                        modal_submit.user.id,
+                        crate::permissions::Action::Configure,
+                        None,
+                    )
+                    .await
+                    .is_ok()
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
             if !allowed {
-                let _ = modal_submit.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
-                    serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
-                )).await;
+                let _ = modal_submit
+                    .create_response(
+                        &ctx.http,
+                        serenity::all::CreateInteractionResponse::Message(
+                            serenity::all::CreateInteractionResponseMessage::new()
+                                .content("Acesso negado.")
+                                .ephemeral(true),
+                        ),
+                    )
+                    .await;
                 return;
             }
             let result = match custom_id.as_str() {
                 "referral_modal" => {
-                    crate::services::member_manager::handle_referral_modal_submit(&ctx, &modal_submit, &guild_config).await
+                    crate::services::member_manager::handle_referral_modal_submit(
+                        &ctx,
+                        &modal_submit,
+                        &guild_config,
+                    )
+                    .await
                 }
                 "owner_setrole" => {
                     crate::commands::owner::handle_setrole_modal(&ctx, &modal_submit).await
@@ -414,10 +600,12 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                     crate::commands::owner::handle_clear_modal(&ctx, &modal_submit).await
                 }
                 "card_create" => {
-                    crate::commands::card::handle_modal_submit(&ctx, &modal_submit, &state.pool).await
+                    crate::commands::card::handle_modal_submit(&ctx, &modal_submit, &state.pool)
+                        .await
                 }
                 _ if custom_id.starts_with("card_edit_") => {
-                    crate::commands::card::handle_modal_submit(&ctx, &modal_submit, &state.pool).await
+                    crate::commands::card::handle_modal_submit(&ctx, &modal_submit, &state.pool)
+                        .await
                 }
                 _ => Ok(()),
             };
@@ -427,5 +615,33 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod callback_lifecycle_tests {
+    use super::dispatch_authorized;
+    use std::cell::Cell;
+
+    #[tokio::test]
+    async fn panel_revoked_before_callback_selects_denial_without_invoking_handler() {
+        let current_membership = Cell::new(Ok(true));
+        let calls = Cell::new(0);
+        let dispatch = || {
+            dispatch_authorized(
+                async { current_membership.get().unwrap_or(false) },
+                || async {
+                    calls.set(calls.get() + 1);
+                    "handled"
+                },
+            )
+        };
+        assert_eq!(dispatch().await, Some("handled")); // panel initially granted
+        current_membership.set(Ok(false)); // permission revoked before component callback
+        assert_eq!(dispatch().await, None); // selects production ephemeral denial branch
+        assert_eq!(calls.get(), 1);
+        current_membership.set(Err(())); // membership resolution unavailable
+        assert_eq!(dispatch().await, None);
+        assert_eq!(calls.get(), 1);
     }
 }

@@ -52,7 +52,11 @@ impl EventHandler for Handler {
 
     async fn guild_delete(&self, ctx: Context, guild: UnavailableGuild, _full: Option<Guild>) {
         if let Some(state) = ctx.data.read().await.get::<BotStateKey>().cloned() {
-            services::anti_raid::guild_deleted(&state.guild_cache, guild.id.get(), guild.unavailable);
+            services::anti_raid::guild_deleted(
+                &state.guild_cache,
+                guild.id.get(),
+                guild.unavailable,
+            );
         }
     }
 
@@ -72,11 +76,23 @@ impl EventHandler for Handler {
         events::guild_member_add::handle(ctx, member).await;
     }
 
-    async fn guild_member_removal(&self, ctx: Context, guild_id: GuildId, user: User, member_data: Option<Member>) {
+    async fn guild_member_removal(
+        &self,
+        ctx: Context,
+        guild_id: GuildId,
+        user: User,
+        member_data: Option<Member>,
+    ) {
         events::guild_member_remove::handle(ctx, guild_id, user, member_data).await;
     }
 
-    async fn guild_member_update(&self, ctx: Context, old: Option<Member>, new: Option<Member>, _event: GuildMemberUpdateEvent) {
+    async fn guild_member_update(
+        &self,
+        ctx: Context,
+        old: Option<Member>,
+        new: Option<Member>,
+        _event: GuildMemberUpdateEvent,
+    ) {
         events::guild_member_update::handle(ctx, old, new).await;
     }
 
@@ -84,11 +100,23 @@ impl EventHandler for Handler {
         events::message_create::handle(ctx, msg).await;
     }
 
-    async fn message_delete(&self, ctx: Context, channel_id: ChannelId, deleted_message_id: MessageId, guild_id: Option<GuildId>) {
+    async fn message_delete(
+        &self,
+        ctx: Context,
+        channel_id: ChannelId,
+        deleted_message_id: MessageId,
+        guild_id: Option<GuildId>,
+    ) {
         events::message_delete::handle(ctx, channel_id, deleted_message_id, guild_id).await;
     }
 
-    async fn message_update(&self, ctx: Context, old: Option<Message>, new: Option<Message>, event: MessageUpdateEvent) {
+    async fn message_update(
+        &self,
+        ctx: Context,
+        old: Option<Message>,
+        new: Option<Message>,
+        event: MessageUpdateEvent,
+    ) {
         events::message_update::handle(ctx, old, new, event).await;
     }
 
@@ -176,18 +204,39 @@ async fn main() {
                     let _ = rustls::crypto::ring::default_provider().install_default();
                     let cert = std::env::var("DASHBOARD_TLS_CERT").unwrap_or_default();
                     let key = std::env::var("DASHBOARD_TLS_KEY").unwrap_or_default();
-                    let tls = match axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await {
+                    let tls = match axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)
+                        .await
+                    {
                         Ok(tls) => tls,
-                        Err(_) => { tracing::error!("Dashboard disabled: invalid TLS configuration"); return; }
+                        Err(_) => {
+                            tracing::error!("Dashboard disabled: invalid TLS configuration");
+                            return;
+                        }
                     };
                     if axum_server::bind_rustls(([0, 0, 0, 0], port).into(), tls)
-                        .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.is_err() {
+                        .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                        .await
+                        .is_err()
+                    {
                         tracing::error!("Dashboard TLS server stopped");
                     }
                 } else {
-                    match tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await {
-                        Ok(listener) => { if axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.is_err() { tracing::error!("Dashboard server stopped"); } }
-                        Err(_) => tracing::error!("Dashboard disabled: cannot bind loopback listener"),
+                    match tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await
+                    {
+                        Ok(listener) => {
+                            if axum::serve(
+                                listener,
+                                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                            )
+                            .await
+                            .is_err()
+                            {
+                                tracing::error!("Dashboard server stopped");
+                            }
+                        }
+                        Err(_) => {
+                            tracing::error!("Dashboard disabled: cannot bind loopback listener")
+                        }
                     }
                 }
             });

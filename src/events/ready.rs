@@ -16,5 +16,4 @@ pub async fn handle(ctx: Context, ready: Ready) {
             tracing::info!("Registered guild commands for {}", guild_id);
         }
     }
-
 }
