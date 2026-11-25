@@ -5,9 +5,7 @@ services:
     environment:
       POSTGRES_DB: bibliotecario
       POSTGRES_USER: bibliotecario
-      POSTGRES_PASSWORD: bibliotecario
-    ports:
-      - "7654:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +20,7 @@ services:
     container_name: abcd
     environment:
       ASSETS_DIR: /app/assets/images
-      DATABASE_URL: postgres://bibliotecario:bibliotecario@db:5432/bibliotecario
+      DATABASE_URL: postgres://bibliotecario:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/bibliotecario
     ports:
       - "3059:3050"
     depends_on:

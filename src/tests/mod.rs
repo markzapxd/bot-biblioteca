@@ -76,12 +76,17 @@ mod db_tests {
     use sqlx::PgPool;
 
     #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL pointing to an isolated test database"]
     async fn print_db_cards() {
-        dotenvy::dotenv().ok();
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://bibliotecario:bibliotecario@localhost:5432/bibliotecario".to_string());
-        println!("Connecting to DB: {}", database_url);
-        let pool = PgPool::connect(&database_url).await.unwrap();
-        let rows: Vec<crate::models::CustomCard> = sqlx::query_as("SELECT * FROM custom_cards").fetch_all(&pool).await.unwrap();
+        let database_url = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must point to an isolated test database");
+        let pool = PgPool::connect(&database_url)
+            .await
+            .unwrap_or_else(|_| panic!("failed to connect to isolated test database"));
+        let rows: Vec<crate::models::CustomCard> = sqlx::query_as("SELECT * FROM custom_cards")
+            .fetch_all(&pool)
+            .await
+            .unwrap_or_else(|_| panic!("failed to query custom_cards in isolated test database"));
         for r in rows {
             println!("=== CARD ===");
             println!("name: {}", r.name);
