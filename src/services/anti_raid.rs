@@ -34,7 +34,6 @@ struct RaidState {
     auto_disable_at: Instant,
 }
 
-static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 static JOIN_TRACKER: Mutex<Vec<JoinEvent>> = Mutex::new(Vec::new());
 static MESSAGE_TRACKER: LazyLock<Mutex<HashMap<(u64, u64), Vec<Instant>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static RAID_STATUS: LazyLock<Mutex<HashMap<u64, RaidState>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -125,13 +124,13 @@ pub async fn detect_message_violation(ctx: &Context, message: &Message, guild_co
 }
 
 pub async fn trigger_raid(ctx: &Context, guild: GuildId, reason: &str, guild_config: &Guild) -> Result<()> {
-    let lock = crate::services::lockdown::operation(guild.get());
-    let guard = lock.lock().await;
+    crate::services::lockdown::serialize(guild.get(), || async {
     let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned().ok_or_else(|| BotError::Internal("No bot state".into()))?;
     // Persist ownership and perform effects before any logging await. Failed effects
     // remain pending and the lifecycle reconciler retries them through the same lock.
     crate::services::lockdown::apply_action_locked(ctx, &state.pool, guild, guild_config, crate::services::lockdown::Action::RaidStart).await?;
-    drop(guard);
+    Ok::<(), BotError>(())
+    }).await?;
 
     let guild_name = if let Ok(guild_info) = guild.to_partial_guild(&ctx.http).await {
         guild_info.name.clone()
@@ -156,13 +155,13 @@ pub async fn trigger_raid(ctx: &Context, guild: GuildId, reason: &str, guild_con
 }
 
 pub async fn disable_raid_mode(ctx: &Context, guild_id: GuildId) -> Result<()> {
-    let lock = crate::services::lockdown::operation(guild_id.get());
-    let _guard = lock.lock().await;
+    crate::services::lockdown::serialize(guild_id.get(), || async {
     let state = ctx.data.read().await.get::<crate::state::BotStateKey>().cloned().ok_or_else(|| BotError::Internal("No bot state".into()))?;
     let config = crate::repositories::guild_repo::find_by_id(&state.pool, &guild_id.to_string()).await?.ok_or_else(|| BotError::NotFound("Guild config".into()))?;
     crate::services::lockdown::apply_action_locked(ctx, &state.pool, guild_id, &config, crate::services::lockdown::Action::RaidDisable).await?;
 
     Ok(())
+    }).await
 }
 
 pub fn is_raid_active(guild_id: u64) -> bool {

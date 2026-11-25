@@ -20,6 +20,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
         (3, include_str!("../../migrations/003_voice_integrity.sql")),
         (4, include_str!("../../migrations/004_support_workflows.sql")),
         (5, include_str!("../../migrations/005_lockdown_snapshots.sql")),
+        (6, include_str!("../../migrations/006_lockdown_generation.sql")),
     ] {
         let applied: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM bot_schema_migrations WHERE version = $1)").bind(version).fetch_one(&mut *tx).await?;
         if !applied {

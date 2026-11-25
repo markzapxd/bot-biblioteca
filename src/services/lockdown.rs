@@ -120,6 +120,17 @@ pub(crate) fn operation(guild: u64) -> std::sync::Arc<tokio::sync::Mutex<()>> {
     map.insert(guild, std::sync::Arc::downgrade(&lock));
     lock
 }
+/// Shared production lifecycle boundary: the closure is not invoked until the
+/// guild lock is owned, including its very first asynchronous lookup.
+pub async fn serialize<T, F, Fut>(guild: u64, work: F) -> T
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    let lock = operation(guild);
+    let _guard = lock.lock().await;
+    work().await
+}
 pub struct Store {
     pool: sqlx::PgPool,
 }
@@ -374,5 +385,49 @@ mod tests {
         let persisted = serde_json::to_value(&original).unwrap();
         assert_eq!(restore_permissions(Some(persisted)).unwrap(), original);
         assert!(restore_permissions(None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod orchestration_tests {
+    use super::*;
+    #[tokio::test]
+    async fn production_boundary_orders_paused_start_disable_and_inverse() {
+        use std::sync::{Arc, Mutex};
+        let active = Arc::new(Mutex::new(false));
+        let (entered, wait) = tokio::sync::oneshot::channel();
+        let (resume, paused) = tokio::sync::oneshot::channel();
+        let a = active.clone();
+        let start = tokio::spawn(async move {
+            serialize(80101, || async move {
+                entered.send(()).unwrap();
+                paused.await.unwrap();
+                *a.lock().unwrap() = true;
+            })
+            .await;
+        });
+        wait.await.unwrap();
+        let a = active.clone();
+        let disable = tokio::spawn(async move {
+            serialize(80101, || async move {
+                *a.lock().unwrap() = false;
+            })
+            .await;
+        });
+        tokio::task::yield_now().await;
+        assert!(!disable.is_finished());
+        resume.send(()).unwrap();
+        start.await.unwrap();
+        disable.await.unwrap();
+        assert!(!*active.lock().unwrap());
+        serialize(80101, || async {
+            *active.lock().unwrap() = false;
+        })
+        .await;
+        serialize(80101, || async {
+            *active.lock().unwrap() = true;
+        })
+        .await;
+        assert!(*active.lock().unwrap());
     }
 }
