@@ -7,8 +7,8 @@ pub async fn handle(ctx: Context, channel_id: ChannelId, deleted_message_id: Mes
             let pool = &state.pool;
             
             
-            let msg_info = ctx.cache.message(channel_id, deleted_message_id)
-                .map(|m| (m.content.clone(), m.author.name.clone()));
+            let msg_info = crate::services::log_manager::take_message(gid, channel_id, deleted_message_id)
+                .map(|m| (m.content, m.author.name));
                 
             if let Some((content, author_name)) = msg_info {
                 let channel_name = channel_id.name(&ctx).await.unwrap_or_else(|_| "unknown".to_string());

@@ -58,8 +58,8 @@ pub async fn handle(ctx: Context, old: Option<Member>, new: Option<Member>) {
                     .await;
                 }
 
-                if old_member.user.avatar != member.user.avatar {
-                    let new_avatar_url = member.user.face();
+                if old_member.user.avatar != member.user.avatar || old_member.avatar != member.avatar {
+                    let new_avatar_url = member.face();
                     let _ = crate::services::log_manager::log_avatar_update(
                         &ctx,
                         member.user.id,
@@ -83,6 +83,9 @@ pub async fn handle(ctx: Context, old: Option<Member>, new: Option<Member>) {
                 }
                 if previous.user.avatar != member.user.avatar {
                     entries.push((HistoryKind::Avatar, serde_json::json!({"url":previous.user.face(), "date":now})));
+                }
+                if previous.avatar != member.avatar {
+                    entries.push((HistoryKind::Avatar, serde_json::json!({"url":previous.face(), "date":now, "guild_id":member.guild_id.to_string()})));
                 }
                 for (kind, entry) in entries {
                     if let Err(e) = append_history(pool, &user_id, kind, entry).await {

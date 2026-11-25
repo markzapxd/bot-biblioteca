@@ -286,6 +286,9 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
                 _ if custom_id.starts_with("cfg_channel_") => {
                     crate::commands::config::handle_channel_select(&ctx, &component, &state).await
                 }
+                _ if custom_id.starts_with("card_page_") => {
+                    crate::commands::card::handle_page(&ctx, &component, &state.pool).await
+                }
                 _ if custom_id == "card_action_create" => {
                     crate::commands::card::handle_create_button(&ctx, &component).await
                 }

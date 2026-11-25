@@ -84,8 +84,8 @@ pub fn message_edit(old: &str, new: &str, author: &serenity::all::User) -> Creat
         .title("Mensagem Editada")
         .thumbnail(author.face())
         .field("Autor", author.name.clone(), true)
-        .field("Antes", old, false)
-        .field("Depois", new, false)
+        .field("Antes", crate::services::log_manager::log_text(old), false)
+        .field("Depois", crate::services::log_manager::log_text(new), false)
         .colour(Colour::new(0x2B2D31))
 }
 
@@ -95,7 +95,7 @@ pub fn message_delete(content: &str, author: &serenity::all::User, channel: &str
         .thumbnail(author.face())
         .field("Autor", author.name.clone(), true)
         .field("Canal", channel, true)
-        .field("Conteúdo", content, false)
+        .field("Conteúdo", crate::services::log_manager::log_text(content), false)
         .colour(Colour::new(0x2B2D31))
 }
 

@@ -33,14 +33,44 @@ pub async fn handle(ctx: &Context, interaction: &CommandInteraction, pool: &PgPo
     Ok(())
 }
 
+#[cfg(test)]
+mod task7_tests {
+    use super::*;
+    fn cards() -> Vec<crate::models::CustomCard> {
+        (1..=26).map(|id| crate::models::CustomCard {
+            id, guild_id: "1".into(), name: "名".repeat(100), title: "😀".repeat(256),
+            description: None, image_url: None, color: None, footer: None,
+            created_by: "1".into(), created_at: chrono::Utc::now(), updated_at: chrono::Utc::now(),
+        }).collect()
+    }
+    #[test]
+    fn task7_menu_limits_and_stable_ids() {
+        let value = serde_json::to_value(build_card_select_menu(&cards(), "edit")).unwrap();
+        let options = value[0]["components"][0]["options"].as_array().unwrap();
+        assert_eq!(options.len(), 25);
+        assert_eq!(options[0]["value"], "1");
+        let last = serde_json::to_value(build_card_page(&cards(), "edit", usize::MAX)).unwrap();
+        assert_eq!(last[0]["components"][0]["options"].as_array().unwrap().len(), 1);
+        assert_eq!(last[0]["components"][0]["options"][0]["value"], "26");
+        let modal = serde_json::to_value(build_card_modal(&format!("card_edit_{}", i32::MAX), Some(&cards()[0]))).unwrap();
+        assert!(modal["custom_id"].as_str().unwrap().len() <= 100);
+        assert!(options[0]["description"].as_str().unwrap().chars().count() <= 100);
+    }
+    #[test]
+    fn task7_main_embed_is_bounded() {
+        let value = serde_json::to_value(build_main_embed(&cards())).unwrap();
+        assert!(value["description"].as_str().unwrap().encode_utf16().count() <= 4096);
+    }
+}
+
 fn build_main_embed(cards: &[crate::models::CustomCard]) -> CreateEmbed {
     let mut desc = String::new();
     if cards.is_empty() {
         desc.push_str("Nenhum card salvo neste servidor.\n");
     } else {
         desc.push_str("Cards salvos:\n");
-        for card in cards {
-            desc.push_str(&format!("`{}` — {}\n", card.name, card.title));
+        for card in cards.iter().take(25) {
+            desc.push_str(&format!("`{}` — {}\n", truncate(&card.name, 40), truncate(&card.title, 80)));
         }
     }
     desc.push_str("\nSelecione uma acao abaixo.");
@@ -75,9 +105,19 @@ fn build_main_rows(has_cards: bool) -> Vec<CreateActionRow> {
 }
 
 fn build_card_select_menu(cards: &[crate::models::CustomCard], action: &str) -> Vec<CreateActionRow> {
-    let options: Vec<CreateSelectMenuOption> = cards.iter()
-        .map(|c| CreateSelectMenuOption::new(&c.name, &c.name)
-            .description(&c.title))
+    build_card_page(cards, action, 0)
+}
+
+fn truncate(text: &str, limit: usize) -> String {
+    let mut units = 0;
+    text.chars().take_while(|c| { units += c.len_utf16(); units <= limit }).collect()
+}
+
+fn build_card_page(cards: &[crate::models::CustomCard], action: &str, page: usize) -> Vec<CreateActionRow> {
+    let page = page.min(cards.len().saturating_sub(1) / 25);
+    let options: Vec<CreateSelectMenuOption> = cards.iter().skip(page * 25).take(25)
+        .map(|c| CreateSelectMenuOption::new(truncate(&c.name, 100), c.id.to_string())
+            .description(truncate(&c.title, 100)))
         .collect();
 
     vec![
@@ -89,6 +129,10 @@ fn build_card_select_menu(cards: &[crate::models::CustomCard], action: &str) -> 
             .placeholder("Selecione um card"),
         ),
         CreateActionRow::Buttons(vec![
+            CreateButton::new(format!("card_page_{}_{}", action, page.saturating_sub(1)))
+                .label("Anterior").disabled(page == 0),
+            CreateButton::new(format!("card_page_{}_{}", action, page + 1))
+                .label("Proxima").disabled((page + 1) * 25 >= cards.len()),
             CreateButton::new("card_action_back")
                 .label("Voltar")
                 .style(ButtonStyle::Secondary),
@@ -224,7 +268,7 @@ pub async fn handle_select_edit(ctx: &Context, component: &ComponentInteraction,
         _ => return Err(BotError::Validation("Invalid selection".into())),
     };
 
-    let card = crate::repositories::custom_card_repo::find_by_name(pool, &guild_id_str, &selected).await?;
+    let card = crate::repositories::custom_card_repo::find_by_guild_id(pool, &guild_id_str, parse_card_id(&selected)?).await?;
     let card = match card {
         Some(c) => c,
         None => {
@@ -254,7 +298,7 @@ pub async fn handle_select_send(ctx: &Context, component: &ComponentInteraction,
         _ => return Err(BotError::Validation("Invalid selection".into())),
     };
 
-    let card = crate::repositories::custom_card_repo::find_by_name(pool, &guild_id_str, &selected).await?;
+    let card = crate::repositories::custom_card_repo::find_by_guild_id(pool, &guild_id_str, parse_card_id(&selected)?).await?;
     match card {
         Some(card) => {
             let embed = crate::embeds::custom_card::build(&card);
@@ -292,7 +336,7 @@ pub async fn handle_select_preview(ctx: &Context, component: &ComponentInteracti
         _ => return Err(BotError::Validation("Invalid selection".into())),
     };
 
-    let card = crate::repositories::custom_card_repo::find_by_name(pool, &guild_id_str, &selected).await?;
+    let card = crate::repositories::custom_card_repo::find_by_guild_id(pool, &guild_id_str, parse_card_id(&selected)?).await?;
     match card {
         Some(card) => {
             let embed = crate::embeds::custom_card::preview(&card);
@@ -324,7 +368,7 @@ pub async fn handle_select_delete(ctx: &Context, component: &ComponentInteractio
         _ => return Err(BotError::Validation("Invalid selection".into())),
     };
 
-    let deleted = crate::repositories::custom_card_repo::delete(pool, &guild_id_str, &selected).await?;
+    let deleted = crate::repositories::custom_card_repo::delete_by_id(pool, &guild_id_str, parse_card_id(&selected)?).await?;
 
     let cards = crate::repositories::custom_card_repo::list_by_guild(pool, &guild_id_str).await?;
     let embed = build_main_embed(&cards);
@@ -472,33 +516,11 @@ pub async fn handle_modal_submit(ctx: &Context, modal: &ModalInteraction, pool: 
                 .ephemeral(true)
         )).await?;
     } else if custom_id.starts_with("card_edit_") {
-        let original_name = custom_id.strip_prefix("card_edit_").unwrap_or(&name);
-
-        let existing = crate::repositories::custom_card_repo::find_by_name(pool, &guild_id_str, original_name).await?;
-        if existing.is_none() {
-            modal.create_response(&ctx.http, CreateInteractionResponse::Message(
-                CreateInteractionResponseMessage::new()
-                    .content(format!("Card `{}` nao encontrado.", original_name))
-                    .ephemeral(true)
-            )).await?;
-            return Ok(());
-        }
-
-        if name != original_name {
-            let _ = crate::repositories::custom_card_repo::delete(pool, &guild_id_str, original_name).await?;
-        }
-
-        let card = crate::repositories::custom_card_repo::create(
-            pool,
-            &guild_id_str,
-            &name,
-            &title,
-            description.as_deref(),
-            image_url.as_deref(),
-            color.as_deref(),
-            None,
-            &user_id.to_string(),
-        ).await?;
+        let id = parse_card_id(custom_id.strip_prefix("card_edit_").unwrap_or_default())?;
+        let card = crate::repositories::custom_card_repo::replace(
+            pool, &guild_id_str, id, &name, &title,
+            description.as_deref(), image_url.as_deref(), color.as_deref(),
+        ).await?.ok_or_else(|| BotError::NotFound("Card nao encontrado".into()))?;
 
         let embed = crate::embeds::custom_card::preview(&card);
         modal.create_response(&ctx.http, CreateInteractionResponse::Message(
@@ -509,5 +531,28 @@ pub async fn handle_modal_submit(ctx: &Context, modal: &ModalInteraction, pool: 
         )).await?;
     }
 
+    Ok(())
+}
+
+fn parse_card_id(value: &str) -> Result<i32> {
+    value.parse::<i32>().ok().filter(|id| *id > 0)
+        .ok_or_else(|| BotError::Validation("Invalid card ID".into()))
+}
+
+pub async fn handle_page(ctx: &Context, component: &ComponentInteraction, pool: &PgPool) -> Result<()> {
+    let suffix = component.data.custom_id.strip_prefix("card_page_")
+        .ok_or_else(|| BotError::Validation("Invalid page".into()))?;
+    let (action, page) = suffix.rsplit_once('_')
+        .ok_or_else(|| BotError::Validation("Invalid page".into()))?;
+    if !["edit", "send", "preview", "delete"].contains(&action) {
+        return Err(BotError::Validation("Invalid card action".into()));
+    }
+    let page = page.parse::<usize>().map_err(|_| BotError::Validation("Invalid page".into()))?;
+    let guild = component.guild_id.ok_or_else(|| BotError::Validation("Guild only".into()))?;
+    let cards = crate::repositories::custom_card_repo::list_by_guild(pool, &guild.to_string()).await?;
+    let rows = if cards.is_empty() { build_main_rows(false) } else { build_card_page(&cards, action, page) };
+    component.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(
+        CreateInteractionResponseMessage::new().embed(build_main_embed(&cards)).components(rows)
+    )).await?;
     Ok(())
 }

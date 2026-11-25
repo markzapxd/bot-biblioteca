@@ -16,13 +16,6 @@ pub async fn create(
     let card = sqlx::query_as::<_, CustomCard>(
         "INSERT INTO custom_cards (guild_id, name, title, description, image_url, color, footer, created_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (guild_id, name) DO UPDATE SET
-             title = EXCLUDED.title,
-             description = EXCLUDED.description,
-             image_url = EXCLUDED.image_url,
-             color = EXCLUDED.color,
-             footer = EXCLUDED.footer,
-             updated_at = NOW()
          RETURNING *"
     )
     .bind(guild_id)
@@ -112,4 +105,25 @@ pub async fn update(
     .fetch_one(pool)
     .await?;
     Ok(Some(card))
+}
+
+// A single UPDATE is atomic; the existing (guild_id, name) unique constraint
+// rejects a conflicting rename without changing either card or its stable ID.
+pub async fn replace(pool: &PgPool, guild: &str, id: i32, name: &str, title: &str,
+    description: Option<&str>, image: Option<&str>, color: Option<&str>) -> Result<Option<CustomCard>> {
+    Ok(sqlx::query_as::<_, CustomCard>("UPDATE custom_cards SET name=$3, title=$4,
+        description=$5, image_url=$6, color=$7, updated_at=NOW()
+        WHERE guild_id=$1 AND id=$2 RETURNING *")
+        .bind(guild).bind(id).bind(name).bind(title).bind(description).bind(image).bind(color)
+        .fetch_optional(pool).await?)
+}
+
+pub async fn find_by_guild_id(pool: &PgPool, guild: &str, id: i32) -> Result<Option<CustomCard>> {
+    Ok(sqlx::query_as::<_, CustomCard>("SELECT * FROM custom_cards WHERE guild_id=$1 AND id=$2")
+        .bind(guild).bind(id).fetch_optional(pool).await?)
+}
+
+pub async fn delete_by_id(pool: &PgPool, guild: &str, id: i32) -> Result<bool> {
+    Ok(sqlx::query("DELETE FROM custom_cards WHERE guild_id=$1 AND id=$2")
+        .bind(guild).bind(id).execute(pool).await?.rows_affected() > 0)
 }

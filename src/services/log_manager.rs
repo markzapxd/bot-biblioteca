@@ -4,6 +4,47 @@ use tracing::error;
 
 use crate::errors::Result;
 
+#[cfg(test)]
+mod task7_tests {
+    use super::*;
+    #[test]
+    fn task7_snapshot_bound_edit_and_delete() {
+        let mut store = MessageSnapshots::default();
+        for id in 1..=1001 {
+            let mut message = Message::default();
+            message.guild_id = Some(GuildId::new(7));
+            message.channel_id = ChannelId::new(8);
+            message.id = MessageId::new(id);
+            message.content = format!("message {id}");
+            store.insert(message);
+        }
+        assert_eq!(store.messages.len(), 1000);
+        assert!(store.take(GuildId::new(7), ChannelId::new(8), MessageId::new(1)).is_none());
+        assert!(store.take(GuildId::new(9), ChannelId::new(8), MessageId::new(2)).is_none());
+        let mut edited = store.take(GuildId::new(7), ChannelId::new(8), MessageId::new(2)).unwrap();
+        assert_eq!(edited.content, "message 2");
+        edited.content = "edited".into();
+        store.insert(edited);
+        assert_eq!(store.take(GuildId::new(7), ChannelId::new(8), MessageId::new(2)).unwrap().content, "edited");
+        assert!(store.take(GuildId::new(7), ChannelId::new(8), MessageId::new(2)).is_none());
+    }
+    #[test]
+    fn task7_log_text_limits() {
+        assert_eq!(log_text(""), "(vazio)");
+        assert!(log_text(&"😀".repeat(2000)).encode_utf16().count() <= 1024);
+        assert!(!nickname_text("a```b").contains("```b"));
+    }
+}
+
+pub fn log_text(text: &str) -> String {
+    if text.is_empty() { return "(vazio)".into(); }
+    let mut units = 0;
+    text.chars().take_while(|c| { units += c.len_utf16(); units <= 1024 }).collect()
+}
+fn nickname_text(text: &str) -> String {
+    log_text(&text.replace('`', "ˋ"))
+}
+
 pub async fn send_log(ctx: &Context, guild_id: u64, embed: CreateEmbed, module: &str, pool: &PgPool) -> Result<()> {
     let guild = match crate::repositories::guild_repo::find_by_id(pool, &guild_id.to_string()).await {
         Ok(Some(g)) => g,
@@ -41,9 +82,9 @@ pub async fn log_message_edit(ctx: &Context, old: &str, new: &str, author: &User
 pub async fn log_message_delete(ctx: &Context, content: &str, author_name: &str, channel_name: &str, guild_id: u64, pool: &PgPool) -> Result<()> {
     let embed = CreateEmbed::new()
         .title("Message Deleted")
-        .field("Author", author_name, true)
-        .field("Channel", channel_name, true)
-        .field("Content", content, false)
+        .field("Author", log_text(author_name), true)
+        .field("Channel", log_text(channel_name), true)
+        .field("Content", log_text(content), false)
         .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, "log_messages", pool).await
 }
@@ -89,7 +130,7 @@ pub async fn log_voice_join(ctx: &Context, user_name: &str, avatar_url: &str, ch
         .title("Voice Channel Join")
         .thumbnail(avatar_url)
         .field("User", user_name, true)
-        .field("Channel", channel_name, true)
+        .field("Channel", log_text(channel_name), true)
         .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, "log_calls", pool).await
 }
@@ -99,7 +140,7 @@ pub async fn log_voice_leave(ctx: &Context, user_name: &str, avatar_url: &str, c
         .title("Voice Channel Leave")
         .thumbnail(avatar_url)
         .field("User", user_name, true)
-        .field("Channel", channel_name, true)
+        .field("Channel", log_text(channel_name), true)
         .field("Duration", crate::utils::time::format_duration(duration), true)
         .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, "log_calls", pool).await
@@ -131,8 +172,48 @@ pub async fn log_nickname_update(ctx: &Context, user: &User, old_nick: &str, new
         .title("Nickname Updated")
         .thumbnail(user.face())
         .field("User", format!("<@{}>", user.id.get()), true)
-        .field("Old Nickname", format!("```\n{}\n```", old_nick), true)
-        .field("New Nickname", format!("```\n{}\n```", new_nick), true)
+        .field("Old Nickname", nickname_text(old_nick), true)
+        .field("New Nickname", nickname_text(new_nick), true)
         .colour(Colour::new(0x2B2D31));
     send_log(ctx, guild_id, embed, "log_names", pool).await
+}
+
+// Global bound, unlike Serenity's per-channel max_messages. No HTTP fallback.
+#[derive(Default)]
+struct MessageSnapshots {
+    messages: std::collections::HashMap<(GuildId, ChannelId, MessageId), Message>,
+    order: std::collections::VecDeque<(GuildId, ChannelId, MessageId)>,
+}
+impl MessageSnapshots {
+    fn insert(&mut self, message: Message) {
+        let Some(guild) = message.guild_id else { return; };
+        let key = (guild, message.channel_id, message.id);
+        // Store only the data consumed by edit/delete logs.
+        let mut snapshot = Message::default();
+        snapshot.id = message.id;
+        snapshot.channel_id = message.channel_id;
+        snapshot.guild_id = Some(guild);
+        snapshot.content = log_text(&message.content);
+        snapshot.author = message.author;
+        let message = snapshot;
+        if self.messages.insert(key, message).is_none() { self.order.push_back(key); }
+        while self.order.len() > 1000 {
+            if let Some(key) = self.order.pop_front() { self.messages.remove(&key); }
+        }
+    }
+    fn take(&mut self, guild: GuildId, channel: ChannelId, id: MessageId) -> Option<Message> {
+        let key = (guild, channel, id);
+        self.order.retain(|entry| *entry != key);
+        self.messages.remove(&key)
+    }
+}
+fn snapshots() -> &'static std::sync::Mutex<MessageSnapshots> {
+    static SNAPSHOTS: std::sync::OnceLock<std::sync::Mutex<MessageSnapshots>> = std::sync::OnceLock::new();
+    SNAPSHOTS.get_or_init(Default::default)
+}
+pub fn snapshot_message(message: &Message) {
+    snapshots().lock().unwrap_or_else(|e| e.into_inner()).insert(message.clone());
+}
+pub fn take_message(guild: GuildId, channel: ChannelId, id: MessageId) -> Option<Message> {
+    snapshots().lock().unwrap_or_else(|e| e.into_inner()).take(guild, channel, id)
 }

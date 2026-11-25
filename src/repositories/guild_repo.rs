@@ -51,11 +51,15 @@ pub async fn update_field(
         "UPDATE guilds SET {} = $2, updated_at = NOW() WHERE guild_id = $1",
         field_name
     );
-    sqlx::query(&query)
-        .bind(guild_id)
-        .bind(value)
-        .execute(pool)
-        .await?;
+    let query = sqlx::query(&query).bind(guild_id);
+    if ["premium", "track_mute", "track_deaf"].contains(&field_name) {
+        let value = value.parse::<bool>().map_err(|_| crate::errors::BotError::Validation(
+            format!("Invalid boolean for {}: expected true or false", field_name)
+        ))?;
+        query.bind(value).execute(pool).await?;
+    } else {
+        query.bind(value).execute(pool).await?;
+    }
     Ok(())
 }
 

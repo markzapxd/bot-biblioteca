@@ -2,6 +2,9 @@ use serenity::all::*;
 use crate::permissions;
 
 pub async fn handle(ctx: Context, msg: Message) {
+    if !msg.author.bot {
+        crate::services::log_manager::snapshot_message(&msg);
+    }
     if msg.author.bot {
         return;
     }
