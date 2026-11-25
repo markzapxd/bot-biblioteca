@@ -135,6 +135,38 @@ fn action_allowed(action: Action, permissions: Permissions) -> bool {
     })
 }
 
+#[cfg(test)]
+mod review_regressions {
+    use super::*;
+
+    #[test]
+    fn only_confirmed_unknown_member_allows_nonmember_ban() {
+        assert!(allows_missing_target(Action::Ban, 404, 10007));
+        assert!(!allows_missing_target(Action::Kick, 404, 10007));
+        assert!(!allows_missing_target(Action::Ban, 403, 50013));
+        assert!(!allows_missing_target(Action::Ban, 404, 10004));
+    }
+
+    #[tokio::test]
+    async fn panel_permission_revocation_is_rechecked_by_callback_guard() {
+        let current = std::cell::Cell::new(Permissions::BAN_MEMBERS);
+        assert!(fresh_action_check(Action::Ban, || async { Ok(current.get()) }).await.is_ok());
+        current.set(Permissions::empty());
+        assert!(fresh_action_check(Action::Ban, || async { Ok(current.get()) }).await.is_err());
+        assert!(fresh_action_check(Action::Ban, || async { Err(BotError::Unauthorized("unavailable".into())) }).await.is_err());
+    }
+}
+
+fn allows_missing_target(action: Action, status: u16, code: isize) -> bool {
+    matches!(action, Action::Ban) && status == 404 && code == 10007
+}
+
+async fn fresh_action_check<F, Fut>(action: Action, fetch: F) -> Result<()>
+where F: FnOnce() -> Fut, Fut: std::future::Future<Output = Result<Permissions>> {
+    if action_allowed(action, fetch().await?) { Ok(()) }
+    else { Err(BotError::Unauthorized("Permissão insuficiente para esta ação".into())) }
+}
+
 fn hierarchy_allowed(guild_owner: bool, caller: u16, target: u16) -> bool {
     guild_owner || caller > target
 }
@@ -149,17 +181,30 @@ pub async fn authorize(
 ) -> Result<()> {
     let guild = guild_id.to_partial_guild(&ctx.http).await?;
     let member = guild_id.member(&ctx.http, caller).await?;
-    #[allow(deprecated)]
-    let permissions = guild.member_permissions(&member);
     // Bot ownership does not confer guild moderation rights or bypass hierarchy.
-    if !action_allowed(action, permissions) {
-        return Err(BotError::Unauthorized("Permissão insuficiente para esta ação".into()));
-    }
+    fresh_action_check(action, || async {
+        let current = guild_id.member(&ctx.http, caller).await?;
+        #[allow(deprecated)]
+        Ok(guild.member_permissions(&current))
+    }).await?;
     if let Some(target_id) = target {
         if target_id == caller || target_id == guild.owner_id || target_id == ctx.cache.current_user().id {
             return Err(BotError::Unauthorized("Alvo protegido".into()));
         }
-        let target_member = guild_id.member(&ctx.http, target_id).await?;
+        let target_member = match guild_id.member(&ctx.http, target_id).await {
+            Ok(member) => Some(member),
+            Err(serenity::Error::Http(serenity::http::HttpError::UnsuccessfulRequest(ref response)))
+                if allows_missing_target(action, response.status_code.as_u16(), response.error.code) => None,
+            Err(error) => return Err(error.into()),
+        };
+        let bot_id = ctx.cache.current_user().id;
+        let bot = guild_id.member(&ctx.http, bot_id).await?;
+        #[allow(deprecated)]
+        let bot_permissions = guild.member_permissions(&bot);
+        fresh_action_check(action, || async { Ok(bot_permissions) }).await?;
+        // Only a confirmed Discord Unknown Member response skips member hierarchy.
+        // Caller and bot action permissions have both been checked above.
+        let Some(target_member) = target_member else { return Ok(()); };
         let position = |m: &Member| -> Result<u16> {
             let mut highest = 0;
             for id in &m.roles {
@@ -171,11 +216,7 @@ pub async fn authorize(
         if !hierarchy_allowed(caller == guild.owner_id, position(&member)?, position(&target_member)?) {
             return Err(BotError::Unauthorized("Hierarquia do alvo não permite esta ação".into()));
         }
-        let bot_id = ctx.cache.current_user().id;
-        let bot = guild_id.member(&ctx.http, bot_id).await?;
-        #[allow(deprecated)]
-        let bot_permissions = guild.member_permissions(&bot);
-        if !action_allowed(action, bot_permissions) || !hierarchy_allowed(false, position(&bot)?, position(&target_member)?) {
+        if !hierarchy_allowed(false, position(&bot)?, position(&target_member)?) {
             return Err(BotError::Unauthorized("Permissão ou hierarquia do bot insuficiente".into()));
         }
         #[allow(deprecated)]

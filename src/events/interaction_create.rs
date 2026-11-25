@@ -11,6 +11,11 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
             tracing::info!("Received command: {}", command.data.name);
             if let Err(e) = crate::commands::route(&ctx, &command, &state).await {
                 tracing::error!("Error routing command {}: {:?}", command.data.name, e);
+                if matches!(e, crate::errors::BotError::Unauthorized(_)) && command.get_response(&ctx.http).await.is_err() {
+                    let _ = command.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
+                        serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
+                    )).await;
+                }
             }
         }
         Interaction::Component(component) => {
@@ -286,6 +291,11 @@ pub async fn handle(ctx: Context, interaction: Interaction) {
 
             if let Err(e) = result {
                 tracing::error!("Error handling component interaction {}: {:?}", custom_id, e);
+                if matches!(e, crate::errors::BotError::Unauthorized(_)) && component.get_response(&ctx.http).await.is_err() {
+                    let _ = component.create_response(&ctx.http, serenity::all::CreateInteractionResponse::Message(
+                        serenity::all::CreateInteractionResponseMessage::new().content("Acesso negado.").ephemeral(true)
+                    )).await;
+                }
             }
         }
         Interaction::Modal(modal_submit) => {
